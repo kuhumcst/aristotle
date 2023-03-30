@@ -57,7 +57,7 @@
           registration (get registry prefix)
           wild? (= "*" (last registration))]
       (if (not wild?)
-        (when (= 1 (count fragment-seq)) (keyword (str/join "." registration) fragment))
+        (keyword (str/join "." registration) fragment)
         (keyword
          (str/join "." (concat (drop-last registration)
                                (drop-last fragment-seq)))
