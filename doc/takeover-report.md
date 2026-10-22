@@ -633,22 +633,22 @@ The map form of triples (`{:rdf/about ...}`) and `rdf-list` stay.
 
 ### Order of work
 
-Each step ends with green tests and a short report to you. Steps 1 to 3
-are done on the branch `feature/jena-6` (see Part 7).
+Each step ends with green tests and a short report to you. Steps 1 to 4
+are done on the branch `feature/jena-6`, and Part 7 tests the first three
+on DanNet's data.
 
 1. **Fast-forward to upstream main** (Jena 5.3 and Clojure 1.12). The only
    fix is the test alias's logback, which no longer binds under SLF4J 2.
 2. **Tests that pin down today's behaviour**, before anything else
    changes: the conversion of every kind of literal DanNet stores, IRIs
    with and without a prefix, blank nodes, `q/run` with bindings and
-   projections, `add` and `read`. Aliases run them on Jena 4.5, 5.6 and
-   6.2, so that each change in behaviour shows up as a failing test with a
-   known cause.
+   projections, `add` and `read`.
 3. **Jena 6.2 with the old API.** The ten API fixes in Part 1 and the
    choice of in-memory graph. DanNet can try this version with only its own
    four Jena fixes, which tests the upgrade on real data before the API
    changes.
 4. **Tooling**: deps.edn aliases, GitHub Actions on Java 21 and clj-kondo.
+   Until step 7, only errors fail the lint in CI.
 5. **The API in the Design section**: the cljc value types, the db value
    with its prefixes, `q` with Flint data or SPARQL strings and values
    bound as nodes, `pull`, `entity` and `transact`. The algebra DSL goes.
@@ -730,6 +730,10 @@ Answered by Simon on 22 October 2026:
 - **Model-driven**, with Jena's own prefix mapping and defaults that an
   option can replace.
 - **The list under "What goes"** stands, `reify` included.
+- **Tooling before the API**, on `feature/jena-6`. The build script waits
+  for the new name in step 8.
+- **No test aliases for older Jena versions.** DanNet goes straight to
+  6.2, and the code no longer compiles on 4.5.
 
 
 Open questions
