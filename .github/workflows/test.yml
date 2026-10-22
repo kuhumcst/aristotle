@@ -1,0 +1,38 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    name: Java 21
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # Jena 6 needs Java 21
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: DeLaGuardo/setup-clojure@13.7.0
+        with:
+          cli: latest
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            .cpcache
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn') }}
+
+      - name: Tests
+        run: clojure -X:test
+
+      # only errors fail the step until the old warnings are fixed
+      - name: Lint
+        run: clojure -Sdeps '{:deps {clj-kondo/clj-kondo {:mvn/version "2026.10.20"}}}' -M -m clj-kondo.main --lint src test --fail-level error
