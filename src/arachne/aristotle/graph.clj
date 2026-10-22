@@ -94,9 +94,11 @@
   LangStr
   (node [obj]
     (NodeFactory/createLiteralLang (str obj) (lang obj)))
+  ;; An xsd:integer rather than an xsd:long, because a 1 in SPARQL or Turtle
+  ;; is an xsd:integer and Jena matches literals by term, not by value.
   Long
   (node [obj]
-    (NodeFactory/createLiteralByValue obj XSDDatatype/XSDlong))
+    (NodeFactory/createLiteralByValue obj XSDDatatype/XSDinteger))
   Integer
   (node [obj]
     (NodeFactory/createLiteralByValue obj XSDDatatype/XSDinteger))
