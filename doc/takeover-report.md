@@ -78,9 +78,11 @@ labels come closest.
   Update URLs can escape file restrictions) is fixed only in 6.2.0.
 - **Avoid 6.0.0.** Its new cancellation code broke property paths on
   TDB2, which 6.1 fixed.
-- **6.x also fixes TDB2 bugs that 4.5 has**: an aborted write could
-  corrupt `nodes-data` (fixed in 6.1), and queries failed after an
-  OutOfMemoryError until a restart (fixed in 6.2).
+- **6.x also fixes TDB2 bugs that 4.5 has.** After an aborted write, the
+  next write could leave a gap of zeros in `nodes-data`, which corrupts
+  the database for good (fixed in 6.1). Any exception inside a write
+  transaction aborts it, so this can happen in normal use. Queries also
+  failed after an OutOfMemoryError until a restart (fixed in 6.2).
 - **DanNet runs OpenJDK 21** in Docker (`docker/dannet/Dockerfile:10`) and
   in CI, which is enough for 6.x.
 
@@ -133,6 +135,9 @@ SLF4J 2 and logging silently goes to NOP.
   rebuild from source, which is the clean way. (Compacting under 6.2 also
   rewrote every term and merged the duplicates in a test, but Jena doesn't
   document that.)
+- **Rolling back isn't safe.** Jena 4.5 opens a database written by 6.2,
+  but its lookups fail in the same way in reverse (tested). Once DanNet's
+  database is rebuilt on 6.2, going back to 4.5 means rebuilding again.
 - **Compaction** has the same API. It is atomic since 5.0, `deleteOld`
   frees disk space since 5.4, and since 5.5 each release of a database
   triggers a full GC. Issue #3488 (compaction can hang) is open.
