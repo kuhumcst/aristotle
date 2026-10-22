@@ -3,7 +3,8 @@
             [arachne.aristotle.registry :as reg]
             [arachne.aristotle.query :as q]
             [arachne.aristotle :as aa]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [ont-app.vocabulary.lstr :refer [->LangStr]]))
 
 (reg/prefix 'foaf "http://xmlns.com/foaf/0.1/")
 (reg/prefix 'socrata "http://www.socrata.com/rdf/terms#")
@@ -238,3 +239,60 @@
                 first
                 ::friends
                 first)))))
+
+;; The ways that DanNet runs queries and reads their results.
+
+(def label-graph
+  (aa/add (aa/graph :simple)
+          [[:test/a :test/label (->LangStr "hund" "da")]
+           [:test/a :test/count 2]
+           [:test/a :test/part '_part]
+           ['_part :test/label "del"]
+           [:test/b :test/label (->LangStr "dog" "en")]
+           [:test/c :test/label "kat"]]))
+
+(deftest result-shapes
+  (testing "rows are maps keyed by variable"
+    (is (= #{{'?s :test/a '?l (->LangStr "hund" "da")}
+             {'?s :test/b '?l (->LangStr "dog" "en")}
+             {'?s :test/c '?l "kat"}
+             {'?s '_part '?l "del"}}
+           (set (q/run label-graph '[:bgp [?s :test/label ?l]])))))
+  (testing "a projection gives a set of vectors"
+    (is (= #{[(->LangStr "hund" "da")]}
+           (q/run label-graph '[?l] '[:bgp [:test/a :test/label ?l]])))))
+
+(deftest initial-bindings
+  (is (= [{'?s :test/b '?l (->LangStr "dog" "en")}]
+         (q/run label-graph '[:bgp [?s :test/label ?l]] {'?s :test/b})))
+  (is (= [{'?s :test/a '?l (->LangStr "hund" "da")}]
+         (q/run label-graph '[:bgp [?s :test/label ?l]]
+                {'?l (->LangStr "hund" "da")})))
+  (is (= 2 (count (q/run label-graph '[:bgp [?s :test/label ?l]]
+                         {'?s [:test/a :test/b]}))))
+  (let [b (get (first (q/run label-graph '[:bgp [:test/a :test/part ?b]])) '?b)]
+    (is (= [{'?b b '?l "del"}]
+           (q/run label-graph '[:bgp [?b :test/label ?l]] {'?b b}))
+        "a blank node from one result finds its triples in the next")))
+
+(deftest parsed-sparql
+  (is (= [{'?s :test/a}]
+         (q/run label-graph
+                (q/parse "PREFIX test: <http://example.com/test/>
+                          SELECT ?s WHERE { ?s test:count 2 }")))
+      "an integer in SPARQL matches a Clojure integer")
+  (is (= 4 (get (first (q/run label-graph
+                              (q/parse "SELECT (COUNT(*) AS ?n)
+                                        WHERE { ?s <http://example.com/test/label> ?l }")))
+                '?n))))
+
+(deftest algebra-forms
+  (is (= 3 (count (q/run label-graph
+                         (q/build '[:union
+                                    [:union
+                                     [:bgp [?s :test/label "kat"]]
+                                     [:bgp [?s :test/label "del"]]]
+                                    [:bgp [?s :test/count 2]]])))))
+  (is (= 3 (count (q/run label-graph
+                         (q/build '[:filter (not= ?s :test/a)
+                                    [:bgp [?s :test/label ?l]]]))))))

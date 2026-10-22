@@ -123,3 +123,9 @@
                      [?bag :rdf/_1 :test/banana]
                      [?bag :rdf/_2 :test/orange]])))))))
 
+(deftest read-file-and-add-graph
+  (let [g  (ar/read (ar/graph :simple) (io/file (io/resource "foaf.rdf")))
+        g' (ar/add (ar/graph :simple) g)]
+    (is (pos? (.size g)))
+    (is (= (.size g) (.size g')))))
+
