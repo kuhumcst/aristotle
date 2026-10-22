@@ -528,7 +528,7 @@ Part 5: DanNet code that could move into the library
 | `db/shapes.clj` report as data | ~100 | **Move**: loading shapes, `validate`, `validate-node`, each report entry as a map (through `data`), `blocking?` and `by-severity`. |
 | `db/shapes.clj` baseline | ~30 | Maybe. It's small, pure and generic, but it is a policy. |
 | `db/shapes.clj` the rest | | **Stay**: DanNet's shapes, logging and `undefined-predicates`. |
-| `db/query.clj` entity maps | ~150 | **Move the core**: a subject's property map with sets for many values, the split into asserted and inferred triples, and blank nodes expanded one level as nested maps. DanNet keeps its symbols with metadata, labels, weighting and `table-query`. This replaces `q/pull`, which needs OWL cardinality inference and which DanNet doesn't use. |
+| `db/query.clj` entity maps | ~150 | **Move the core**: a subject's property map with sets for many values, the split into asserted and inferred triples, and blank nodes expanded one level as nested maps. DanNet keeps its symbols with metadata, labels, weighting and `table-query`. `q/pull` is rebuilt on it, without the OWL cardinality inference it needs today. |
 | `entity.clj` pruning | ~135 | **Stay.** It works on Clojure maps for display and never touches Jena. It belongs with a future Linked Data pages library. |
 
 That is about 450 lines into the library and about 200 that stay.
@@ -561,25 +561,55 @@ The coordinates would follow your other libraries, e.g.
 comes from Aristotle, with a NOTICE that credits Aristotle and says the
 library was changed. Your other libraries are MIT.
 
-### Scope
+### Design
 
-A JVM-only Clojure library for Jena: RDF terms as Clojure data, graphs and
+A Clojure library for Jena: RDF terms as Clojure data, graphs and
 datasets, SPARQL as strings or Flint data, transactions and timeouts, TDB2,
-rules, ARQ functions and SHACL. A first sketch of the public API:
+rules, ARQ functions and SHACL. The decisions of 22 October shape it:
 
-- **The root namespace**:
-  - terms: `node` and `data`;
-  - prefixes: one registry, which also writes PREFIX blocks and Flint's
-    `:prefixes`;
-  - graphs: `graph`, `read`, `write`, `add!` and `remove!`;
-  - queries: `query` (a SPARQL string or Flint data to a Jena `Query`),
-    `run` (with values bound as nodes and a timeout) and `update!`;
-  - transactions: `transact`, `transact-read` and `with-hard-timeout`;
-  - `entity`.
+- **An API like Datomic's**, which Datalevin and Asami share: a db value,
+  `q`, `pull`, `entity` and `transact`. Datalevin isn't immutable either,
+  so a live Jena graph is no obstacle.
+  - The db value wraps a Model or a Dataset and carries the prefixes and
+    the conversion options, much as a Datomic db carries its schema.
+  - `q` takes Flint data or a SPARQL string, compiles it once and binds
+    values as nodes. Datomic-shaped queries (`:find`, `:in`, `:where`)
+    translated into Flint may come later.
+  - `pull` keeps Datomic's pattern syntax but is rebuilt on `entity`
+    without OWL cardinality: a property with several values gives a set.
+  - `entity` comes from DanNet's entity maps.
+- **Models at the API, graphs inside.** Jena keeps prefixes on the graph,
+  a Model exposes them as a `PrefixMapping`, and TDB2 stores them on disk.
+  So the library has no registry of its own. The prefixes come from a
+  `default-prefixes` map, which an option can replace or extend, and the
+  library sets them on the Model. Turning IRIs into keywords needs a
+  cached index of the longest namespaces, since that happens for millions
+  of nodes.
+- **Every value works in CLJ and CLJS.** One cljc namespace holds the
+  value types and the rules for converting RDF terms:
+
+  | RDF term | CLJ | CLJS |
+  |---|---|---|
+  | IRI with a known prefix | keyword | keyword |
+  | blank node | `_label` symbol | symbol |
+  | xsd:string | string | string |
+  | language-tagged string | `LangStr` | `LangStr` |
+  | xsd:boolean | boolean | boolean |
+  | xsd:integer and its subtypes | Long (BigInteger when large) | number |
+  | xsd:double, xsd:float | Double | number |
+  | everything else | `Literal` | `Literal` |
+
+  `LangStr` and `Literal` are deftypes of our own, with reader tags and
+  printing. They aren't records, since a record is a map and the map form
+  of triples would take it for a nested resource. A `Literal` holds the
+  lexical form and the datatype IRI, and a `value` function turns it into
+  a platform value on demand. That covers decimals, dates, times,
+  durations, custom datatypes and ill-formed literals, which then no
+  longer throw, and it ends the leaking of Jena's `XSDDateTime` and
+  `BaseDatatype$TypedValue`.
 - **Public namespaces for separate concerns**: `shacl`, `rules` (reasoners
   and the asserted/inferred split), `tdb2` (connecting, compacting and
-  importing) and `function` (ARQ functions).
-- **`impl.*`** for everything else.
+  importing) and `function` (ARQ functions), with `impl.*` for the rest.
 
 ### What goes
 
@@ -587,20 +617,24 @@ DanNet pins a commit, so nothing needs deprecating: it moves over in one
 go when it's ready.
 
 - The algebra DSL: `q/build`, the compiler and its specs. Flint replaces it.
-- `q/pull`. `entity` replaces it.
 - `validation`, which wraps the OWL reasoner's checks. SHACL replaces it.
 - The rule DSL in `inference`. Rules come as Jena rule text, as in DanNet.
 - The RDF/EDN reader, the `#rdf/prefix` reader tags, and the registry's
   wildcard namespaces, aliases and `reg/with`. A plain prefix map replaces
   them.
-- `reify`, which is RDF 1.1 reification.
-- The jaxb-api dependency.
+- `reify`, which is RDF 1.1 reification, and its tests. RDF 1.2 triple
+  terms and reifiers replace it, and the library has to handle triple
+  terms anyway.
+- The jaxb-api dependency, a 2018 beta of an API that the JDK dropped in
+  Java 11, used for one call that java.time can make.
+- ont-app/vocabulary, once `LangStr` is our own.
 
 The map form of triples (`{:rdf/about ...}`) and `rdf-list` stay.
 
 ### Order of work
 
-Each step ends with green tests and a short report to you.
+Each step ends with green tests and a short report to you. Steps 1 to 3
+are done on the branch `feature/jena-6` (see Part 7).
 
 1. **Fast-forward to upstream main** (Jena 5.3 and Clojure 1.12). The only
    fix is the test alias's logback, which no longer binds under SLF4J 2.
@@ -615,10 +649,11 @@ Each step ends with green tests and a short report to you.
    four Jena fixes, which tests the upgrade on real data before the API
    changes.
 4. **Tooling**: deps.edn aliases, GitHub Actions on Java 21 and clj-kondo.
-5. **Queries with Flint**: strings or Flint data to a `Query`, values bound
-   as nodes, VALUES blocks, timeouts, updates, and rows in the same shape
-   as today. The algebra DSL goes. The tests must cover binding a blank
-   node, which DanNet does to look up blank node entities.
+5. **The API in the Design section**: the cljc value types, the db value
+   with its prefixes, `q` with Flint data or SPARQL strings and values
+   bound as nodes, `pull`, `entity` and `transact`. The algebra DSL goes.
+   The tests must cover binding a blank node, which DanNet does to look up
+   blank node entities.
 6. **The code from DanNet** in Part 5.
 7. **Cleanup and docs**: the README in the style of your other libraries,
    docstrings, and a clean clj-kondo run.
@@ -641,6 +676,34 @@ This happens later, in two stages:
    Part 5 are deleted. Most of the 111 `q/run` calls don't change.
 
 
+Part 7: Jena 6.2 on DanNet's data
+---------------------------------
+
+On 22 October, steps 1 to 3 went onto the branch `feature/jena-6`, and
+DanNet's branch of the same name pins it and has its four Jena fixes.
+DanNet's tests pass and all its namespaces load on 6.2, as on 4.5.
+
+Then a full DanNet database was built twice from the same release files:
+once with master on Jena 4.5 and once with `feature/jena-6` on Jena 6.2.
+
+- **The build** took about as long: 229 s on 4.5 and 207 s on 6.2.
+- **10,304,231 quads without blank nodes** came out of each, and 175 of
+  them differ on each side:
+  - 6 counts in the dataset metadata, now xsd:integer, as decided;
+  - 169 quads on three FrameNet IRIs with a space in them, e.g.
+    `frame:Social relation_semType`. The stored data is the same, but Jena
+    6.2 writes the space as ` ` where 4.5 wrote it raw. An IRI can't
+    contain a space, so this is a DanNet bug in `premon.clj` (`st-kw`),
+    which the upgrade only exposes.
+- **Identical**: the counts per graph and predicate, blank nodes included;
+  the entity maps of 300 sampled synsets, words and senses, read through
+  the inference graph; the results of 51 of DanNet's queries; and the
+  SHACL report.
+- **Faster on 6.2**: `eq-sense-match-query` over the whole graph took half
+  a second on 6.2 and still hadn't finished after 15 minutes on 4.5. DanNet
+  itself runs it on the small COR.SEM graph.
+
+
 Decisions
 ---------
 
@@ -654,21 +717,29 @@ Answered by Simon on 13 October 2026:
 - **The name waits until the changes are made.** Until then the work is a
   fork of Aristotle, pushed to kuhumcst/aristotle as origin.
 
+Answered by Simon on 22 October 2026:
+
+- **Start the work**, tested with DanNet on a feature branch, with
+  surgical changes.
+- **A `LangStr` of our own**, the simplest thing that fits a cljc codebase.
+- **Every value type needs a CLJS equivalent**, kept in one cljc namespace.
+- **An API close to Datomic, Datalevin and Asami.** `pull` stays if it is
+  generic.
+- **`q` takes Flint data or SPARQL strings.** Datomic-shaped queries may
+  come later.
+- **Model-driven**, with Jena's own prefix mapping and defaults that an
+  option can replace.
+- **The list under "What goes"** stands, `reify` included.
+
 
 Open questions
 --------------
 
 Needed before step 5:
 
-1. **Should LangStr stay ont-app's record?** I suggest yes, since DanNet's
-   ClojureScript and transit handlers use it. It has no field for a base
-   direction, so the library has to either drop the direction, refuse
-   such literals or use a record of its own. I suggest refusing them until
-   DanNet needs them.
-2. **Should the library change conversions that DanNet relies on?** E.g.
-   java.time in place of `XSDDateTime` and `java.util.Date`, a record in
-   place of `BaseDatatype$TypedValue`, and `java.net.URI` in place of
-   `"<…>"` strings. Each one changes DanNet's transit tags and UI. I suggest
-   fixing only what throws (ill-formed literals) in the first release and
-   leaving the rest for when the Linked Data pages work starts.
-3. **Is the list under "What goes" right?**
+1. **IRIs without a known prefix.** Keep the `"<…>"` strings that DanNet
+   expects, or use a small type of our own, which ends the confusion with
+   string literals but changes the most code in DanNet?
+2. **Which prefixes win** when the ones stored in a TDB2 database differ
+   from the ones passed in? I suggest the ones passed in, written on
+   connect.
