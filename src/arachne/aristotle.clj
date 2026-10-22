@@ -30,7 +30,7 @@
 
 (defmethod graph :simple
   [_]
-  (GraphMemFactory/createGraphMem))
+  (GraphMemFactory/createDefaultGraph))
 
 (defmethod graph :jena-mini
   [_]
@@ -44,7 +44,7 @@
   (let [reasoner (GenericRuleReasoner. initial-rules)]
      (.setOWLTranslation reasoner true)
      (.setTransitiveClosureCaching reasoner true)
-     (.bind reasoner (GraphMemFactory/createGraphMem))))
+     (.bind reasoner (GraphMemFactory/createDefaultGraph))))
 
 (defn add
   "Add the given data to a graph, returning the graph. Data must satisfy

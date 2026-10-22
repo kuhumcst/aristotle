@@ -4,12 +4,12 @@
             [clojure.spec.alpha :as s]
             [arachne.aristotle.graph :as g])
   (:import [org.apache.jena.graph Node NodeFactory Triple Node_Variable Node_Blank]
-           [org.apache.jena.sparql.expr Expr NodeValue ExprVar ExprList E_GreaterThan E_Equals E_LessThan E_GreaterThanOrEqual E_LogicalNot E_LogicalAnd E_LogicalOr E_NotEquals E_LessThanOrEqual E_BNode E_Bound E_Conditional E_Datatype E_DateTimeDay E_DateTimeHours E_DateTimeMinutes E_DateTimeMonth E_DateTimeSeconds E_DateTimeTimezone E_DateTimeYear E_Divide E_Exists E_IRI E_IsIRI E_IsBlank E_IsLiteral E_IsNumeric E_IsURI E_Add E_Lang E_LangMatches E_MD5 E_Multiply E_Subtract E_Now E_NumAbs E_NumCeiling E_NumFloor E_NumRound E_Random E_Regex E_SameTerm E_Str E_SHA1 E_SHA224 E_SHA256 E_SHA384 E_SHA512 E_StrAfter E_StrBefore E_StrConcat E_StrContains E_StrDatatype E_StrLength E_StrEndsWith E_StrStartsWith E_StrLang E_StrSubstring E_StrUpperCase E_StrUUID E_StrLowerCase E_UnaryPlus E_UnaryMinus E_URI E_Version E_UUID E_StrEncodeForURI E_StrReplace E_Coalesce E_OneOf E_NotOneOf E_Function E_NotExists ExprAggregator]
+           [org.apache.jena.sparql.expr Expr NodeValue ExprVar ExprList E_GreaterThan E_Equals E_LessThan E_GreaterThanOrEqual E_LogicalNot E_LogicalAnd E_LogicalOr E_NotEquals E_LessThanOrEqual E_BNode E_Bound E_If E_Datatype E_DateTimeDay E_DateTimeHours E_DateTimeMinutes E_DateTimeMonth E_DateTimeSeconds E_DateTimeTimezone E_DateTimeYear E_Divide E_Exists E_IRI E_IsIRI E_IsBlank E_IsLiteral E_IsNumeric E_IsURI E_Add E_Lang E_LangMatches E_MD5 E_Multiply E_Subtract E_Now E_NumAbs E_NumCeiling E_NumFloor E_NumRound E_Random E_Regex E_SameTerm E_Str E_SHA1 E_SHA224 E_SHA256 E_SHA384 E_SHA512 E_StrAfter E_StrBefore E_StrConcat E_StrContains E_StrDatatype E_StrLength E_StrEndsWith E_StrStartsWith E_StrLang E_StrSubstring E_StrUpperCase E_StrUUID E_StrLowerCase E_UnaryPlus E_UnaryMinus E_URI E_Version E_UUID E_StrEncodeForURI E_StrReplace E_Coalesce E_OneOf E_NotOneOf E_Function E_NotExists ExprAggregator]
            [org.apache.jena.sparql.core BasicPattern Var VarExprList QuadPattern Quad]
            [org.apache.commons.lang3.reflect ConstructorUtils]
            [org.apache.jena.sparql.algebra OpAsQuery Algebra Table Op]
            [org.apache.jena.sparql.algebra.table Table1 TableN]
-           [org.apache.jena.sparql.algebra.op OpDistinct OpProject OpFilter OpBGP OpConditional OpDatasetNames OpDiff OpDisjunction OpDistinctReduced OpExtend OpGraph OpGroup OpJoin OpLabel OpLeftJoin OpList OpMinus OpNull OpOrder OpQuad OpQuadBlock OpQuadPattern OpReduced OpSequence OpSlice OpTopN OpUnion OpTable]
+           [org.apache.jena.sparql.algebra.op OpDistinct OpProject OpFilter OpBGP OpConditional OpDatasetNames OpAntiJoin OpDisjunction OpDistinctReduced OpExtend OpGraph OpGroup OpJoin OpLabel OpLeftJoin OpList OpMinus OpNull OpOrder OpQuad OpQuadBlock OpQuadPattern OpReduced OpSequence OpSlice OpTopN OpUnion OpTable]
            [org.apache.jena.sparql.expr.aggregate AggCount$AccCount AggSum AggAvg AggMin AggMax AggGroupConcat$AccGroupConcat AggSample$AccSample AggGroupConcat AggCount AggCountVar AggCountDistinct AggCountVarDistinct AggSample]
            [org.apache.jena.query SortCondition]
            [org.apache.jena.sparql.engine.binding BindingBuilder]
@@ -145,7 +145,7 @@
     :bgp (OpBGP. (BasicPattern/wrap (mapcat triples args)))
     :conditional (OpConditional. (op a1) (op a2))
     :dataset-names (OpDatasetNames. (graph/node a1))
-    :diff (OpDiff/create (op a1) (op a2))
+    :diff (OpAntiJoin/create (op a1) (op a2))
     :disjunction (OpDisjunction/create (op a1) (op a2))
     :extend (OpExtend/create (op a2) (var-expr-list a1))
     :graph (OpGraph. (graph/node a1) (op a2))
@@ -191,7 +191,6 @@
    '>=          E_GreaterThanOrEqual
    'abs         E_NumAbs
    'and         E_LogicalAnd
-   'bnode       E_BNode
    'bound       E_Bound
    'ceil        E_NumCeiling
    'concat      E_StrConcat
@@ -201,7 +200,7 @@
    'encode      E_StrEncodeForURI
    'floor       E_NumFloor
    'hours       E_DateTimeHours
-   'if          E_Conditional
+   'if          E_If
    'iri         E_IRI
    'uri         E_URI
    'isBlank     E_IsBlank
@@ -265,6 +264,9 @@
         (= f '-) (if (= 1 (count args))
                    (E_UnaryMinus. (first args))
                    (E_Subtract. (first args) (second args)))
+        (= f 'bnode) (if (seq args)
+                       (E_BNode/create ^Expr (first args))
+                       (E_BNode/create))
         (= f 'coalesce) (E_Coalesce. (ExprList. ^List args))
         (= f 'in) (E_OneOf. (first args) (ExprList. ^List (rest args)))
         (= f 'not-in) (E_NotOneOf. (first args) (ExprList. ^List (rest args)))

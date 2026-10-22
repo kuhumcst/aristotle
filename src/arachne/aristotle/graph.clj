@@ -93,7 +93,7 @@
       (NodeFactory/createLiteralByValue obj XSDDatatype/XSDstring)))
   LangStr
   (node [obj]
-    (NodeFactory/createLiteral (str obj) (lang obj) XSDDatatype/XSDstring))
+    (NodeFactory/createLiteralLang (str obj) (lang obj)))
   Long
   (node [obj]
     (NodeFactory/createLiteralByValue obj XSDDatatype/XSDlong))
@@ -117,7 +117,7 @@
     (node (doto (GregorianCalendar.) (.setTime obj))))
   Calendar
   (node [obj]
-    (NodeFactory/createLiteral
+    (NodeFactory/createLiteralDT
       (DatatypeConverter/printDateTime obj)
       XSDDatatype/XSDdateTime))
   Node
