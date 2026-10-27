@@ -1,18 +1,25 @@
 (ns arachne.aristotle.api
-  "A db of a Jena Model or Dataset, in the style of Datomic: db, transact
-  and read. It takes the place of the root namespace when the old API goes."
+  "A db of a Jena Model or Dataset, in the style of Datomic: db, q,
+  transact and read. It takes the place of the root namespace when the old
+  API goes."
   (:refer-clojure :exclude [read])
   (:require [arachne.aristotle.impl.convert :as convert]
             [arachne.aristotle.txn :as txn]
             [arachne.aristotle.term :as term]
             [clojure.java.io :as io])
   (:import [java.io Writer]
+           [java.util Map]
+           [java.util.concurrent TimeUnit]
            [org.apache.jena.graph Graph GraphMemFactory GraphUtil Node Triple]
-           [org.apache.jena.query Dataset DatasetFactory]
+           [org.apache.jena.query Dataset DatasetFactory Query QueryFactory
+            Syntax]
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.riot RDFLanguages RDFParser]
-           [org.apache.jena.shared PrefixMapping]
-           [org.apache.jena.sparql.core DatasetGraph]))
+           [org.apache.jena.shared PrefixMapping PrefixMapping$Factory]
+           [org.apache.jena.sparql.core DatasetGraph Var]
+           [org.apache.jena.sparql.engine.binding Binding BindingFactory]
+           [org.apache.jena.sparql.exec QueryExec RowSet]
+           [org.apache.jena.sparql.syntax ElementData ElementGroup]))
 
 (defrecord Db [model dataset prefixes])
 
@@ -22,17 +29,6 @@
   (.write writer (str "#object[" (.getName Db) " \""
                       (if (:dataset db) "a Dataset" "a Model")
                       " with " (count (:prefixes db)) " prefixes\"]")))
-
-(defn- prefix-map
-  "The `prefixes` as Jena takes them: each prefix as a string, mapped to its
-  namespace IRI without angle brackets."
-  [prefixes]
-  (into {}
-        (for [[prefix ns-iri] prefixes]
-          (if-let [iri (term/iri ns-iri prefixes)]
-            [(name prefix) iri]
-            (throw (ex-info (str "Not a namespace IRI: " (pr-str ns-iri))
-                            {:prefix prefix :namespace ns-iri}))))))
 
 (defn db
   "The db of `x`, a Jena Model, Dataset, Graph or DatasetGraph, with these
@@ -58,7 +54,7 @@
      (throw (ex-info (str "Not a Model, Dataset or Graph: " x) {:x x}))
 
      :else
-     (let [mapping           (prefix-map prefixes)
+     (let [mapping           (convert/prefix-map prefixes)
            ^PrefixMapping pm (if (instance? Dataset x)
                                (.getPrefixMapping ^Dataset x)
                                x)]
@@ -150,3 +146,125 @@
            (.base (str url))
            (.parse g)))
      (transact db g graph))))
+
+(defn query
+  "The Jena Query of the SPARQL string `s`, parsed with the `prefixes` set
+  beforehand, default-prefixes unless given, so that `s` needs no PREFIX
+  lines for them."
+  ([s]
+   (query s term/default-prefixes))
+  ([s prefixes]
+   (let [pm (doto (PrefixMapping$Factory/create)
+              (.setNsPrefixes ^Map (convert/prefix-map prefixes)))
+         q  (doto (Query.) (.setPrefixMapping pm))]
+     (QueryFactory/parse q s nil Syntax/defaultQuerySyntax)
+     q)))
+
+(defn- variable
+  "The Jena Var of the symbol `sym`, e.g. ?s."
+  ^Var [sym]
+  (if (and (symbol? sym) (= \? (first (name sym))))
+    (Var/alloc (subs (name sym) 1))
+    (throw (ex-info (str "Not a variable: " (pr-str sym)) {:variable sym}))))
+
+(defn- inline-data
+  "The VALUES block of the `rows` of values of the variables `vars`, with
+  nil for unbound."
+  ^ElementData [vars rows prefixes]
+  (let [data (ElementData.)]
+    (doseq [v vars]
+      (.add data (variable v)))
+    (doseq [row rows]
+      (let [b (BindingFactory/builder)]
+        (doseq [[v x] (map vector vars row)
+                :when (some? x)]
+          (.add b (variable v) (convert/node x prefixes)))
+        (.add data (.build b))))
+    data))
+
+;; SPARQL 1.1 Query Language, section 10.2: a VALUES block at the start of
+;; the WHERE clause joins with the rest, as initial bindings did, and keeps
+;; the bound variables in the results, which a substitution doesn't
+(defn- bind
+  "The copy of `query` with the `bindings` at the start of its WHERE clause,
+  with values under `prefixes`."
+  ^Query [^Query query bindings prefixes]
+  (let [q     (.cloneQuery query)
+        group (ElementGroup.)]
+    (doseq [[k v] bindings]
+      (.addElement group (cond
+                           (vector? k)
+                           (inline-data k v prefixes)
+
+                           (or (sequential? v) (set? v))
+                           (inline-data [k] (map vector v) prefixes)
+
+                           :else
+                           (inline-data [k] [[v]] prefixes))))
+    (when-let [pattern (.getQueryPattern q)]
+      (.addElement group pattern))
+    (.setQueryPattern q group)
+    q))
+
+(defn- rows
+  "The rows of the `row-set` as maps of variable to value, with IRIs under
+  `prefixes` as keywords."
+  [^RowSet row-set prefixes]
+  (mapv (fn [^Binding b]
+          (into {}
+                (map (fn [^Var v]
+                       [(symbol (str "?" (.getVarName v)))
+                        (convert/data (.get b v) prefixes)]))
+                (iterator-seq (.vars b))))
+        (iterator-seq row-set)))
+
+(defn- graph->db
+  "A db of the in-memory Graph `g` that a query returned, with `prefixes`."
+  [g prefixes]
+  (db g {:prefixes prefixes}))
+
+;; TODO: a projection into a set of tuples, e.g. {:find [?s ?o]}, as
+;; Aristotle's q/run had, if Datomic-shaped queries don't bring one
+(defn q
+  "The results of `x`, a SPARQL query as a string or a Query, on `db`, with
+  the `bindings` and these `opts`:
+
+  - :timeout, in milliseconds, after which Jena cancels the query when it
+    moves on to the next result. For a hard timeout, see the txn namespace.
+
+  A string is parsed with the prefixes of `db`. A binding gives a variable
+  one value, e.g. {'?s :ex/a}, several values, e.g. {'?s [:ex/a :ex/b]},
+  or gives several variables rows of values, e.g.
+  {'[?s ?o] [[:ex/a nil] [:ex/b \"x\"]]}, with nil for unbound. The values
+  go in as RDF terms, never as SPARQL text.
+
+  A SELECT returns a vector of maps of variable to value, and an ASK a
+  boolean. A CONSTRUCT or DESCRIBE returns a new db of an in-memory Model
+  of the triples, with the prefixes of `db`. The query runs in a read
+  transaction."
+  ([x db]
+   (q x db nil nil))
+  ([x db bindings]
+   (q x db bindings nil))
+  ([x {:keys [^Model model ^Dataset dataset prefixes] :as db} bindings
+    {:keys [timeout] :as opts}]
+   (let [parsed       (if (string? x) (query x prefixes) x)
+         ^Query bound (cond-> parsed
+                        (seq bindings) (bind bindings prefixes))
+         exec         (if dataset
+                        (QueryExec/dataset (.asDatasetGraph dataset))
+                        (QueryExec/graph (.getGraph model)))
+         builder      (cond-> (.query exec bound)
+                        timeout (.timeout (long timeout)
+                                          TimeUnit/MILLISECONDS))]
+     (txn/calculate-read
+       (or dataset model)
+       #(with-open [qe (.build builder)]
+          (cond
+            (.isSelectType bound)    (rows (.select qe) prefixes)
+            (.isAskType bound)       (.ask qe)
+            (.isConstructType bound) (graph->db (.construct qe) prefixes)
+            (.isDescribeType bound)  (graph->db (.describe qe) prefixes)
+            :else (throw (ex-info (str "Not a SELECT, ASK, CONSTRUCT or "
+                                       "DESCRIBE query: " bound)
+                                  {:query bound}))))))))

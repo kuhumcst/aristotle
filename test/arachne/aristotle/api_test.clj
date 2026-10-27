@@ -7,12 +7,14 @@
             [arachne.aristotle.impl.convert :as convert]
             [arachne.aristotle.txn :as txn]
             [arachne.aristotle.term :as term])
-  (:import [clojure.lang ExceptionInfo]
+  (:import [arachne.aristotle.api Db]
+           [clojure.lang ExceptionInfo]
            [java.io File]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [org.apache.jena.graph Graph GraphMemFactory Node]
-           [org.apache.jena.query Dataset]
+           [org.apache.jena.query Dataset Query QueryCancelledException
+            QueryParseException]
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.reasoner ReasonerRegistry]
            [org.apache.jena.riot RDFDataMgr]
@@ -175,3 +177,102 @@
                                        "<http://example.com/s> ."))]
         (is (thrown? Exception (api/read db ttl :ex/broken))))
       (is (zero? (graph-size db "http://example.com/broken"))))))
+
+(def label-data
+  "The triples of the pinned query tests, which DanNet's queries resemble."
+  [[:ex/a :rdfs/label (term/->LangStr "hund" "da")]
+   [:ex/a :ex/count 2]
+   [:ex/a :ex/part '_part]
+   ['_part :rdfs/label "del"]
+   [:ex/b :rdfs/label (term/->LangStr "dog" "en")]
+   [:ex/c :rdfs/label "kat"]])
+
+(defn label-dbs
+  "A db of an in-memory Model and one of TDB2, both with the label data."
+  []
+  [(api/transact (api/db (ModelFactory/createDefaultModel) {:prefixes prefixes})
+                 label-data)
+   (api/transact (api/db (TDB2Factory/createDataset) {:prefixes prefixes})
+                 label-data)])
+
+(deftest query
+  (is (instance? Query (api/query "SELECT * WHERE { ?s rdfs:label ?l }"))
+      "the default prefixes need no PREFIX line")
+  (is (instance? Query (api/query "SELECT * WHERE { ?s ex:p ?o }" prefixes)))
+  (is (thrown? QueryParseException
+               (api/query "SELECT * WHERE { ?s ex:p ?o }"))
+      "ex isn't one of the default prefixes"))
+
+(deftest select
+  (doseq [db (label-dbs)]
+    (is (= #{{'?s :ex/a '?l (term/->LangStr "hund" "da")}
+             {'?s :ex/b '?l (term/->LangStr "dog" "en")}
+             {'?s :ex/c '?l "kat"}
+             {'?s '_part '?l "del"}}
+           (set (api/q "SELECT * WHERE { ?s rdfs:label ?l }" db))))
+    (is (= [{'?s :ex/a}] (api/q (api/query "SELECT ?s WHERE { ?s ex:count 2 }"
+                                           prefixes)
+                                db))
+        "a Query, and an integer in SPARQL matching a Clojure integer")))
+
+(deftest bindings
+  (doseq [db (label-dbs)
+          :let [labels #(api/q "SELECT * WHERE { ?s rdfs:label ?l }" db %)]]
+    (is (= [{'?s :ex/b '?l (term/->LangStr "dog" "en")}] (labels {'?s :ex/b}))
+        "one value, kept in the rows")
+    (is (= [{'?s :ex/a '?l (term/->LangStr "hund" "da")}]
+           (labels {'?l (term/->LangStr "hund" "da")})))
+    (is (= 2 (count (labels {'?s [:ex/a :ex/b]}))) "several values")
+    (is (= [{'?s :ex/b '?l (term/->LangStr "dog" "en")}]
+           (labels {'?s [:ex/a :ex/b]
+                    '?l ["kat" (term/->LangStr "dog" "en")]}))
+        "several variables with several values each")
+    (is (= #{:ex/a :ex/c} (set (map '?s (labels {'[?s ?l] [[:ex/a nil]
+                                                           [nil "kat"]]}))))
+        "rows of values, with nil for unbound")
+    (is (= [{'?l "kat"}]
+           (api/q "SELECT ?l WHERE { ?s rdfs:label ?l }" db {'?s :ex/c}))
+        "the SELECT decides which variables come back")
+    (is (= [{'?n 2}]
+           (api/q "SELECT (COUNT(*) AS ?n) WHERE { ?s rdfs:label ?l }"
+                  db {'?s [:ex/a :ex/c]}))
+        "the values limit what the count counts")
+    (let [b (get (first (api/q "SELECT ?b WHERE { ex:a ex:part ?b }" db)) '?b)]
+      (is (= [{'?b b '?l "del"}]
+             (api/q "SELECT * WHERE { ?b rdfs:label ?l }" db {'?b b}))
+          "a blank node from one result finds its triples in the next"))
+    (is (thrown-with-msg? ExceptionInfo #"Not a variable"
+                          (labels {'s :ex/a})))))
+
+(deftest values-as-nodes
+  (let [db   (api/db (TDB2Factory/createDataset) {:prefixes prefixes})
+        evil "x\" } ; DROP ALL ; SELECT * { ?s ?p \""]
+    (api/transact db [[:ex/s :ex/p evil]])
+    (is (= [{'?s :ex/s}] (api/q "SELECT ?s WHERE { ?s ex:p ?o }" db {'?o evil}))
+        "a value goes in as a node, never as SPARQL text")))
+
+(deftest ask-construct-describe
+  (doseq [db (label-dbs)]
+    (is (true? (api/q "ASK { ex:a ex:count 2 }" db)))
+    (is (false? (api/q "ASK { ex:a ex:count 3 }" db)))
+    (is (true? (api/q "ASK { ?s ex:count ?n }" db {'?s :ex/a})))
+    (let [result (api/q "CONSTRUCT { ?s ex:name ?l } WHERE { ?s rdfs:label ?l }"
+                        db)]
+      (is (instance? Db result))
+      (is (= (:prefixes db) (:prefixes result)))
+      (is (= #{"kat" "del"
+               (term/->LangStr "hund" "da") (term/->LangStr "dog" "en")}
+             (set (map '?l (api/q "SELECT ?l WHERE { ?s ex:name ?l }" result))))
+          "a CONSTRUCT returns a db that can be queried"))
+    (is (= 4 (.size ^Model (:model (api/q "DESCRIBE ex:a" db))))
+        "Jena describes ex:a with the triples of its blank node too")))
+
+(deftest timeout
+  (let [db (api/db (ModelFactory/createDefaultModel) {:prefixes prefixes})]
+    (api/transact db (for [i (range 100)] [:ex/s :ex/p i]))
+    (is (= 100 (count (api/q "SELECT * WHERE { ?s ?p ?o }" db nil
+                             {:timeout 10000}))))
+    (is (thrown? QueryCancelledException
+                 (api/q "SELECT * WHERE { ?a ?p ?w . ?b ?p ?x . ?c ?p ?y }"
+                        db nil {:timeout 50}))
+        "a million rows take longer than 50 ms")))

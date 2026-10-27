@@ -29,6 +29,17 @@
            (sort-by (comp - count second))
            (vec)))))
 
+(defn prefix-map
+  "The `prefixes` as Jena takes them: each prefix as a string, mapped to its
+  namespace IRI without angle brackets."
+  [prefixes]
+  (into {}
+        (for [[prefix ns-iri] prefixes]
+          (if-let [iri (term/iri ns-iri prefixes)]
+            [(name prefix) iri]
+            (throw (ex-info (str "Not a namespace IRI: " (pr-str ns-iri))
+                            {:prefix prefix :namespace ns-iri}))))))
+
 (defn iri->data
   "The IRI `s` as a keyword, when the longest namespace of `prefixes` that
   it starts with leaves a name, without a slash, or else in angle brackets.
