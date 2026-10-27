@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    name: Java 21
+    name: Java 21, Node 24
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -22,6 +22,11 @@ jobs:
         with:
           cli: latest
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+
       - uses: actions/cache@v6
         with:
           path: |
@@ -32,6 +37,19 @@ jobs:
 
       - name: Tests
         run: clojure -X:test
+
+      # The build runs the tests itself, but exits 0 when one fails, so
+      # node runs the built file, and its exit code fails the step.
+      - name: Node tests
+        run: |
+          npm ci
+          clojure -M:cljs compile test --config-merge '{:autorun false}'
+          node target/node-tests.js
+
+      - name: Node tests, compiled with advanced optimizations
+        run: |
+          clojure -M:cljs release test --config-merge '{:autorun false}'
+          node target/node-tests.js
 
       # only errors fail the step until the old warnings are fixed
       - name: Lint

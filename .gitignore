@@ -17,3 +17,7 @@ jena-docs
 .DS_Store
 .clj-kondo/.cache/
 .lsp/
+
+# ClojureScript tooling
+node_modules/
+.shadow-cljs/
