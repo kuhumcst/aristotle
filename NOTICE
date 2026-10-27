@@ -1,0 +1,9 @@
+Theophrastus
+Copyright 2026 Centre for Language Technology, University of Copenhagen
+
+Theophrastus began as a fork of Aristotle
+(https://github.com/arachne-framework/aristotle), written by Luke
+VanderHart and licensed under the Apache License 2.0. It has since been
+rewritten: it moved to Apache Jena 6, replaced Aristotle's query DSL with
+SPARQL and its registry with Jena's prefix mappings, and took over code
+from DanNet for transactions, TDB2, rules, SPARQL functions and SHACL.
