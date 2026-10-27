@@ -2,6 +2,7 @@
   "The db of a Model or Dataset with its prefixes, transact and read, on an
   in-memory Model and on TDB2."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [arachne.aristotle.api :as api]
             [arachne.aristotle.impl.convert :as convert]
@@ -382,3 +383,119 @@
           "unlimited recursion")
       (is (= :ex/luke (-> (jim '...) :ex/friends :ex/friends :ex/friends))
           "a recursion stops at a subject already pulled"))))
+
+(deftest map-form
+  (let [m  (ModelFactory/createDefaultModel)
+        db (api/db m {:prefixes prefixes})]
+    (api/transact db [{:rdf/about :ex/jane
+                       :ex/name   "Jane"
+                       :ex/knows  [{:rdf/about :ex/bill :ex/name "Bill"}
+                                   {:rdf/about :ex/nicole :ex/name "Nicole"}]}])
+    (is (= 5 (.size m)) "nested maps with an :rdf/about"))
+  (let [db (api/db (ModelFactory/createDefaultModel) {:prefixes prefixes})]
+    (api/transact db [{:rdf/about :ex/luke :ex/_knows :ex/jon}
+                      {:rdf/about :ex/hannah
+                       :ex/_knows [{:rdf/about :ex/luke}]}])
+    (is (= #{[:ex/jon :ex/luke] [:ex/luke :ex/hannah]}
+           (set (map (juxt '?a '?b)
+                     (api/q "SELECT * WHERE { ?a ex:knows ?b }" db))))
+        "a predicate such as :ex/_knows links the other way"))
+  (let [m  (ModelFactory/createDefaultModel)
+        db (api/db m {:prefixes prefixes})]
+    (api/transact db [{:rdf/about :ex/luke :ex/name "Luke" :ex/knows [nil]}
+                      {:rdf/about :ex/nobody}])
+    (is (= 1 (.size m)) "nil gives no value, and an empty map no triples"))
+  (let [db (api/db (ModelFactory/createDefaultModel) {:prefixes prefixes})]
+    (api/transact db [{:rdf/about :ex/a :ex/address {:ex/city "Copenhagen"}}])
+    (is (= {:ex/address {:ex/city "Copenhagen"}} (api/entity db :ex/a))
+        "a nested map without an :rdf/about is a blank node"))
+  (doseq [db (people-dbs)
+          :let [luke (api/entity db :ex/luke)
+                copy (api/db (ModelFactory/createDefaultModel)
+                             {:prefixes prefixes})]]
+    (api/transact copy [(assoc luke :rdf/about :ex/luke)])
+    (is (= luke (api/entity copy :ex/luke))
+        "an entity written back reads the same")))
+
+(deftest lists-and-containers
+  (let [db (api/db (ModelFactory/createDefaultModel) {:prefixes prefixes})]
+    (api/transact db [{:rdf/about   :ex/race
+                       :ex/starters (api/rdf-list
+                                      [:ex/luke :ex/stuart :ex/joe])}
+                      {:rdf/about   :ex/groceries
+                       :ex/contents (api/rdf-bag [:ex/apple :ex/banana
+                                                  :ex/orange])}])
+    (is (true? (api/q "ASK { ex:race ex:starters ?l0 .
+                             ?l0 rdf:first ex:luke ; rdf:rest ?l1 .
+                             ?l1 rdf:first ex:stuart ; rdf:rest ?l2 .
+                             ?l2 rdf:first ex:joe ; rdf:rest rdf:nil }"
+                      db)))
+    (is (false? (api/q "ASK { ?l a rdf:List }" db))
+        "as in Turtle, a list has no rdf:type")
+    (is (= :rdf/nil (api/rdf-list [])))
+    (is (true? (api/q "ASK { ex:groceries ex:contents ?bag .
+                             ?bag a rdf:Bag ; rdf:_1 ex:apple ;
+                                  rdf:_2 ex:banana ; rdf:_3 ex:orange }"
+                      db))
+        "the members start at rdf:_1, as in RDF Schema")
+    (is (= {:rdf/type :rdf/Seq :rdf/_1 :ex/a :rdf/_2 :ex/b}
+           (api/rdf-seq [:ex/a :ex/b])))
+    (is (= :rdf/Alt (:rdf/type (api/rdf-alt [:ex/a]))))))
+
+(deftest write
+  (doseq [[db graph] [[(first (people-dbs)) nil]
+                      [(api/transact (api/db (TDB2Factory/createDataset)
+                                             {:prefixes prefixes})
+                                     people
+                                     :ex/g)
+                       :ex/g]]
+          :let [f    (temp-file ".ttl" "")
+                copy (api/db (ModelFactory/createDefaultModel)
+                             {:prefixes prefixes})]]
+    (is (identical? db (api/write db f graph)))
+    (is (str/includes? (slurp f) "PREFIX ex:") "with the prefixes of the db")
+    (api/read copy f)
+    (is (= (count people) (graph-size copy)))
+    (is (= (api/entity (first (people-dbs)) :ex/luke)
+           (api/entity copy :ex/luke))))
+  (is (thrown-with-msg? ExceptionInfo #"Not a syntax for one graph"
+                        (api/write (first (people-dbs)) (temp-file ".nq" "")))))
+
+(def census-prefixes
+  "The prefixes of Aristotle's query tests on the census data."
+  (assoc term/default-prefixes
+    :socrata "<http://www.socrata.com/rdf/terms#>"
+    :ds      "<https://data.lacity.org/resource/zzzz-zzzz/>"))
+
+(def census
+  "Aristotle's census data."
+  (delay
+    (api/read (api/db (ModelFactory/createDefaultModel)
+                      {:prefixes census-prefixes})
+              "test/la_census.rdf")))
+
+(deftest census-bindings
+  (let [where  (str "WHERE { ?e ds:zip_code ?zip ; socrata:rowID ?id ;"
+                    "            ds:total_population ?pop . ?e ?a ?v }")
+        tuples (fn [vars bindings]
+                 (set (map (apply juxt vars)
+                           (api/q (str "SELECT DISTINCT " (str/join " " vars)
+                                       " " where)
+                                  @census bindings))))]
+    (is (= #{["90001" "57110"]} (tuples '[?zip ?pop] {'?zip "90001"}))
+        "one variable, one value")
+    (is (= #{["90001" "57110"] ["90005" "37681"]}
+           (tuples '[?zip ?pop] {'?zip ["90001" "90005"]}))
+        "one variable, several values")
+    (is (= #{} (tuples '[?pop] {'?zip "90001" '?id "228"}))
+        "several variables, one value each")
+    (is (= #{["51223"]} (tuples '[?pop] {'?zip ["90001" "90002"]
+                                         '?id  ["2" "3"]}))
+        "several variables, several values each")
+    (is (= #{["57110"]} (tuples '[?pop] {'[?zip ?id] [["90001" "1"]
+                                                     ["90002" "0"]]}))
+        "rows of values")
+    (is (= #{["57110"] ["51223"]}
+           (tuples '[?pop] {'[?zip ?id] [["90001" "1"]
+                                        ["90002" nil]]}))
+        "rows of values, some unbound")))

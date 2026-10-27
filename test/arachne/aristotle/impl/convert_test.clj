@@ -188,3 +188,11 @@
   (is (= (OffsetDateTime/parse "2024-01-02T03:04:05+02:00")
          (term/value (->data (str "\"2024-01-02T03:04:05+02:00\"^^<" xsd "dateTime>")))))
   (is (= "4.5" (str (term/value (->data "4.5"))))))
+
+(deftest date-round-trip
+  (let [date (java.util.Date. 1704164645000)
+        n    (convert/node date prefixes)]
+    (is (= (str xsd "dateTime") (second (literal n))))
+    (is (= (.toInstant date)
+           (.toInstant ^OffsetDateTime (term/value (convert/data n prefixes))))
+        "a Date comes back through value as an OffsetDateTime, the same instant")))

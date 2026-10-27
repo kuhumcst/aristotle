@@ -51,6 +51,5 @@ jobs:
           clojure -M:cljs release test --config-merge '{:autorun false}'
           node target/node-tests.js
 
-      # only errors fail the step until the old warnings are fixed
       - name: Lint
-        run: clojure -Sdeps '{:deps {clj-kondo/clj-kondo {:mvn/version "2026.10.20"}}}' -M -m clj-kondo.main --lint src test --fail-level error
+        run: clojure -Sdeps '{:deps {clj-kondo/clj-kondo {:mvn/version "2026.10.20"}}}' -M -m clj-kondo.main --lint src test

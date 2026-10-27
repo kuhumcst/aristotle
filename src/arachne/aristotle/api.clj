@@ -1,21 +1,22 @@
 (ns arachne.aristotle.api
   "A db of a Jena Model or Dataset, in the style of Datomic: db, q, entity,
-  pull, transact and read. It takes the place of the root namespace when
-  the old API goes."
+  pull, transact, read and write."
   (:refer-clojure :exclude [read])
   (:require [arachne.aristotle.impl.convert :as convert]
             [arachne.aristotle.txn :as txn]
             [arachne.aristotle.term :as term]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.string :as str])
   (:import [java.io Writer]
            [java.util Map]
            [java.util.concurrent TimeUnit]
-           [org.apache.jena.graph Graph GraphMemFactory GraphUtil Node Triple]
+           [org.apache.jena.graph Graph GraphMemFactory GraphUtil Node
+            NodeFactory Triple]
            [org.apache.jena.query Dataset DatasetFactory Query QueryFactory
             Syntax]
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.reasoner BaseInfGraph]
-           [org.apache.jena.riot RDFLanguages RDFParser]
+           [org.apache.jena.riot Lang RDFDataMgr RDFLanguages RDFParser]
            [org.apache.jena.shared PrefixMapping PrefixMapping$Factory]
            [org.apache.jena.sparql.core DatasetGraph Var]
            [org.apache.jena.sparql.engine.binding Binding BindingFactory]
@@ -68,20 +69,64 @@
          (->Db nil x prefixes)
          (->Db x nil prefixes))))))
 
-(defn- ->triples
-  "The Jena triples of `tx-data`, a coll of [s p o] triples of Clojure
-  values, with keywords under `prefixes`."
-  [tx-data prefixes]
-  (mapv (fn [t]
-          (if (and (vector? t) (= 3 (count t)))
-            (let [[s p o] t]
-              (Triple/create (convert/node s prefixes)
-                             (convert/node p prefixes)
-                             (convert/node o prefixes)))
-            (throw (ex-info (str "Not a triple: " (pr-str t)) {:triple t}))))
-        tx-data))
+;; RDF Schema 1.1, section 5.1.5: rdf:_1, rdf:_2 and so on are the
+;; container membership properties, not reversed ones
+(defn- reverse-property
+  "The predicate that the keyword `p` names the other way round, e.g.
+  :ex/knows for :ex/_knows, or nil when it doesn't."
+  [p]
+  (when (keyword? p)
+    (let [n (name p)]
+      (when (and (str/starts-with? n "_")
+                 (not (re-matches #"_[1-9][0-9]*" n)))
+        (keyword (namespace p) (subs n 1))))))
 
-(defn- target
+(defn- map->triples
+  "The Jena node of the subject of the map `m`, its :rdf/about or a new
+  blank node, and the triples of its properties, with keywords under
+  `prefixes`. A nested map is a subject of its own, and a predicate such as
+  :ex/_knows links the other way."
+  [m prefixes]
+  (let [s (if-let [about (:rdf/about m)]
+            (convert/node about prefixes)
+            (NodeFactory/createBlankNode))]
+    [s (vec (for [[p v] (dissoc m :rdf/about)
+                  :let  [reverse (reverse-property p)
+                         pred    (convert/node (or reverse p) prefixes)]
+                  x     (if (or (set? v) (sequential? v)) v [v])
+                  :when (some? x)
+                  :let  [[o more] (if (map? x)
+                                    (map->triples x prefixes)
+                                    [(convert/node x prefixes) []])]
+                  t     (cons (if reverse
+                                (Triple/create o pred s)
+                                (Triple/create s pred o))
+                              more)]
+              t))]))
+
+(defn- ->triples
+  "The Jena triples of `tx-data`: [s p o] triples of Clojure values, maps of
+  a subject's properties, and colls of these, with keywords under
+  `prefixes`."
+  [tx-data prefixes]
+  (cond
+    (map? tx-data)
+    (second (map->triples tx-data prefixes))
+
+    (and (vector? tx-data) (= 3 (count tx-data)) (not-any? coll? tx-data))
+    (let [[s p o] tx-data]
+      [(Triple/create (convert/node s prefixes)
+                      (convert/node p prefixes)
+                      (convert/node o prefixes))])
+
+    (coll? tx-data)
+    (into [] (mapcat #(->triples % prefixes)) tx-data)
+
+    :else
+    (throw (ex-info (str "Not a triple or a map: " (pr-str tx-data))
+                    {:tx-data tx-data}))))
+
+(defn jena-graph
   "The Jena graph of `db` that `graph` names: its default graph when nil."
   ^Graph [{:keys [^Model model ^Dataset dataset prefixes] :as db} graph]
   (cond
@@ -102,9 +147,17 @@
   "Add `tx-data` to the default graph of `db`, or to the named `graph`, in
   one write transaction, and return `db`.
 
-  The data is a coll of [s p o] triples of Clojure values, or a Jena Graph
-  or Model. It's all converted first, so an error in it leaves the db as it
-  was. A plain in-memory Model has no transactions (see the txn namespace)."
+  The data is a Jena Graph or Model, or a coll of:
+
+  - [s p o] triples of Clojure values;
+  - maps of the properties of a subject, its :rdf/about or else a new blank
+    node. A set or a vector gives several values, and nil none. A nested
+    map is a subject of its own, so an entity can be written back. A
+    predicate such as :ex/_knows links the other way;
+  - colls of these.
+
+  It's all converted first, so an error in it leaves the db as it was. A
+  plain in-memory Model has no transactions (see the txn namespace)."
   ([db tx-data]
    (transact db tx-data nil))
   ([{:keys [model dataset prefixes] :as db} tx-data graph]
@@ -113,7 +166,7 @@
                   (instance? Model tx-data) (.getGraph ^Model tx-data)
                   :else (->triples tx-data prefixes))]
      (txn/calculate-write (or dataset model)
-                          #(let [g (target db graph)]
+                          #(let [g (jena-graph db graph)]
                              (if (instance? Graph source)
                                (GraphUtil/addInto g ^Graph source)
                                (GraphUtil/add g ^java.util.List source))))
@@ -147,6 +200,65 @@
            (.base (str url))
            (.parse g)))
      (transact db g graph))))
+
+(defn write
+  "Write the default graph of `db`, or the named `graph`, to the file
+  `target`, a File or a path, and return `db`. The file name gives the
+  syntax, e.g. Turtle for .ttl, and the file has the prefixes of `db`."
+  ([db target]
+   (write db target nil))
+  ([{:keys [model dataset] :as db} target graph]
+   (let [f    (io/file target)
+         lang (RDFLanguages/filenameToLang (str f))]
+     (cond
+       (nil? lang)
+       (throw (ex-info (str "No RDF syntax for the name " f) {:target target}))
+
+       (RDFLanguages/isQuads lang)
+       (throw (ex-info (str "Not a syntax for one graph: " lang)
+                       {:target target})))
+     (txn/calculate-read (or dataset model)
+                         #(with-open [out (io/output-stream f)]
+                            (RDFDataMgr/write out
+                                              (jena-graph db graph)
+                                              ^Lang lang)))
+     db)))
+
+;; RDF 1.1 Turtle, section 2.8: a collection is rdf:first, rdf:rest and
+;; rdf:nil, with no rdf:type
+(defn rdf-list
+  "The RDF list of the `items`, in the map form of transact, or :rdf/nil
+  when there are none."
+  [items]
+  (if (seq items)
+    {:rdf/first (first items)
+     :rdf/rest  (rdf-list (rest items))}
+    :rdf/nil))
+
+;; RDF Schema 1.1, sections 5.1.2 to 5.1.5: a container's members are the
+;; values of rdf:_1, rdf:_2 and so on
+(defn rdf-container
+  "The RDF container of the `type`, e.g. :rdf/Bag, with the `items` as its
+  members, in the map form of transact."
+  [type items]
+  (into {:rdf/type type}
+        (map-indexed (fn [i x] [(keyword "rdf" (str "_" (inc i))) x]))
+        items))
+
+(defn rdf-bag
+  "The RDF Bag of the `items`, in the map form of transact."
+  [items]
+  (rdf-container :rdf/Bag items))
+
+(defn rdf-alt
+  "The RDF Alt of the `items`, in the map form of transact."
+  [items]
+  (rdf-container :rdf/Alt items))
+
+(defn rdf-seq
+  "The RDF Seq of the `items`, in the map form of transact."
+  [items]
+  (rdf-container :rdf/Seq items))
 
 (defn query
   "The Jena Query of the SPARQL string `s`, parsed with the `prefixes` set
