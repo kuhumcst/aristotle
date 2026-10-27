@@ -7,9 +7,11 @@
   (:import [arachne.aristotle.term LangStr Literal]
            [clojure.lang Keyword Symbol]
            [java.net URI]
+           [java.util Map]
            [org.apache.jena.datatypes TypeMapper]
            [org.apache.jena.datatypes.xsd XSDDatatype]
            [org.apache.jena.graph Node NodeFactory]
+           [org.apache.jena.shared PrefixMapping PrefixMapping$Factory]
            [org.apache.jena.sparql.core Var]
            [org.apache.jena.sys JenaSystem]))
 
@@ -39,6 +41,12 @@
             [(name prefix) iri]
             (throw (ex-info (str "Not a namespace IRI: " (pr-str ns-iri))
                             {:prefix prefix :namespace ns-iri}))))))
+
+(defn prefix-mapping
+  "The Jena PrefixMapping of the `prefixes`."
+  ^PrefixMapping [prefixes]
+  (doto (PrefixMapping$Factory/create)
+    (.setNsPrefixes ^Map (prefix-map prefixes))))
 
 (defn iri->data
   "The IRI `s` as a keyword, when the longest namespace of `prefixes` that

@@ -1,14 +1,13 @@
 (ns arachne.aristotle.api
   "A db of a Jena Model or Dataset, in the style of Datomic: db, q, entity,
-  pull, transact, read and write."
-  (:refer-clojure :exclude [read])
+  pull, transact!, retract!, update!, read! and write. The functions that
+  change a db end in !."
   (:require [arachne.aristotle.impl.convert :as convert]
             [arachne.aristotle.txn :as txn]
             [arachne.aristotle.term :as term]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import [java.io Writer]
-           [java.util Map]
            [java.util.concurrent TimeUnit]
            [org.apache.jena.graph Graph GraphMemFactory GraphUtil Node
             NodeFactory Triple]
@@ -17,11 +16,13 @@
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.reasoner BaseInfGraph]
            [org.apache.jena.riot Lang RDFDataMgr RDFLanguages RDFParser]
-           [org.apache.jena.shared PrefixMapping PrefixMapping$Factory]
+           [org.apache.jena.shared PrefixMapping]
            [org.apache.jena.sparql.core DatasetGraph Var]
            [org.apache.jena.sparql.engine.binding Binding BindingFactory]
-           [org.apache.jena.sparql.exec QueryExec RowSet]
-           [org.apache.jena.sparql.syntax ElementData ElementGroup]))
+           [org.apache.jena.sparql.exec QueryExec RowSet UpdateExec
+            UpdateExecBuilder]
+           [org.apache.jena.sparql.syntax ElementData ElementGroup]
+           [org.apache.jena.update UpdateFactory UpdateRequest]))
 
 (defrecord Db [model dataset prefixes])
 
@@ -143,7 +144,7 @@
         (throw (ex-info (str "Not a graph name: " (pr-str graph))
                         {:graph graph}))))))
 
-(defn transact
+(defn transact!
   "Add `tx-data` to the default graph of `db`, or to the named `graph`, in
   one write transaction, and return `db`.
 
@@ -159,7 +160,7 @@
   It's all converted first, so an error in it leaves the db as it was. A
   plain in-memory Model has no transactions (see the txn namespace)."
   ([db tx-data]
-   (transact db tx-data nil))
+   (transact! db tx-data nil))
   ([{:keys [model dataset prefixes] :as db} tx-data graph]
    (let [source (cond
                   (instance? Graph tx-data) tx-data
@@ -172,7 +173,33 @@
                                (GraphUtil/add g ^java.util.List source))))
      db)))
 
-(defn read
+(defn retract!
+  "Remove the triples that the `patterns` match from the default graph of
+  `db`, or from the named `graph`, in one write transaction, and return
+  `db`. A pattern is an [s p o] triple of Clojure values in which _ matches
+  anything, e.g. [:ex/luke :ex/age '_], and one may stand alone. They're
+  all converted first, so an error in one leaves the db as it was."
+  ([db patterns]
+   (retract! db patterns nil))
+  ([{:keys [model dataset prefixes] :as db} patterns graph]
+   (let [triple? #(and (vector? %) (= 3 (count %)) (not-any? coll? %))
+         nodes   (mapv (fn [pattern]
+                         (if (triple? pattern)
+                           (mapv #(if (= '_ %)
+                                    Node/ANY
+                                    (convert/node % prefixes))
+                                 pattern)
+                           (throw (ex-info (str "Not a pattern: "
+                                                (pr-str pattern))
+                                           {:pattern pattern}))))
+                       (if (triple? patterns) [patterns] patterns))]
+     (txn/calculate-write (or dataset model)
+                          #(let [g (jena-graph db graph)]
+                             (doseq [[s p o] nodes]
+                               (.remove g s p o))))
+     db)))
+
+(defn read!
   "Read the RDF file at `source` into the default graph of `db`, or into the
   named `graph`, and return `db`.
 
@@ -180,7 +207,7 @@
   syntax, e.g. Turtle for .ttl. The whole file is parsed before anything is
   added, so a syntax error leaves the db as it was."
   ([db source]
-   (read db source nil))
+   (read! db source nil))
   ([db source graph]
    (let [url  (io/as-url (if (string? source) (io/file source) source))
          lang (RDFLanguages/filenameToLang (str url))
@@ -199,7 +226,7 @@
            (.lang lang)
            (.base (str url))
            (.parse g)))
-     (transact db g graph))))
+     (transact! db g graph))))
 
 (defn write
   "Write the default graph of `db`, or the named `graph`, to the file
@@ -227,7 +254,7 @@
 ;; RDF 1.1 Turtle, section 2.8: a collection is rdf:first, rdf:rest and
 ;; rdf:nil, with no rdf:type
 (defn rdf-list
-  "The RDF list of the `items`, in the map form of transact, or :rdf/nil
+  "The RDF list of the `items`, in the map form of transact!, or :rdf/nil
   when there are none."
   [items]
   (if (seq items)
@@ -239,24 +266,24 @@
 ;; values of rdf:_1, rdf:_2 and so on
 (defn rdf-container
   "The RDF container of the `type`, e.g. :rdf/Bag, with the `items` as its
-  members, in the map form of transact."
+  members, in the map form of transact!."
   [type items]
   (into {:rdf/type type}
         (map-indexed (fn [i x] [(keyword "rdf" (str "_" (inc i))) x]))
         items))
 
 (defn rdf-bag
-  "The RDF Bag of the `items`, in the map form of transact."
+  "The RDF Bag of the `items`, in the map form of transact!."
   [items]
   (rdf-container :rdf/Bag items))
 
 (defn rdf-alt
-  "The RDF Alt of the `items`, in the map form of transact."
+  "The RDF Alt of the `items`, in the map form of transact!."
   [items]
   (rdf-container :rdf/Alt items))
 
 (defn rdf-seq
-  "The RDF Seq of the `items`, in the map form of transact."
+  "The RDF Seq of the `items`, in the map form of transact!."
   [items]
   (rdf-container :rdf/Seq items))
 
@@ -267,9 +294,8 @@
   ([s]
    (query s term/default-prefixes))
   ([s prefixes]
-   (let [pm (doto (PrefixMapping$Factory/create)
-              (.setNsPrefixes ^Map (convert/prefix-map prefixes)))
-         q  (doto (Query.) (.setPrefixMapping pm))]
+   (let [q (doto (Query.)
+             (.setPrefixMapping (convert/prefix-mapping prefixes)))]
      (QueryFactory/parse q s nil Syntax/defaultQuerySyntax)
      q)))
 
@@ -507,3 +533,41 @@
   recursion stops at a subject that it has already pulled on its way."
   [db pattern subject]
   (pull* db pattern subject 0 #{}))
+
+(defn- substitute
+  "The builder `b` with the variable `k` bound to the value `v`, under
+  `prefixes`."
+  ^UpdateExecBuilder [^UpdateExecBuilder b k v prefixes]
+  (let [n (convert/node k prefixes)]
+    (if (and (instance? Var n) (not (or (sequential? v) (set? v))))
+      (.substitution b ^Var n ^Node (convert/node v prefixes))
+      (throw (ex-info (str "Not a variable with one value: " k)
+                      {:variable k :value v})))))
+
+(defn update!
+  "Run the SPARQL Update `x`, a string or an UpdateRequest, on `db` with the
+  `bindings` in one write transaction, and return `db`.
+
+  A string is parsed with the prefixes of `db`. A binding gives a variable
+  one value, e.g. {'?s :ex/luke}, which goes in as an RDF term, never as
+  SPARQL text."
+  ([db x]
+   (update! db x nil))
+  ([{:keys [^Model model ^Dataset dataset prefixes] :as db} x bindings]
+   (let [^UpdateRequest request (if (string? x)
+                                  (doto (UpdateRequest.)
+                                    (.setPrefixMapping
+                                      (convert/prefix-mapping prefixes))
+                                    (UpdateFactory/parse ^String x))
+                                  x)
+         builder                (reduce-kv #(substitute %1 %2 %3 prefixes)
+                                           (-> (if dataset
+                                                 (UpdateExec/dataset
+                                                   (.asDatasetGraph dataset))
+                                                 (UpdateExec/graph
+                                                   (.getGraph model)))
+                                               (.update request))
+                                           bindings)]
+     (txn/calculate-write (or dataset model)
+                          #(.execute (.build ^UpdateExecBuilder builder)))
+     db)))
