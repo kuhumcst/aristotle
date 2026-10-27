@@ -564,9 +564,8 @@ library was changed. Your other libraries are MIT.
 ### Design
 
 A Clojure library for Jena: RDF terms as Clojure data, graphs and
-datasets, SPARQL as strings or Flint data, transactions and timeouts, TDB2,
-rules, ARQ functions and SHACL. The decisions of 22 and 27 October
-shape it:
+datasets, SPARQL queries, transactions and timeouts, TDB2, rules, ARQ
+functions and SHACL. The decisions of 22 and 27 October shape it:
 
 - **Close to the standards and to Clojure idioms.** Code that follows a
   rule from a standard cites the standard.
@@ -575,9 +574,11 @@ shape it:
   so a live Jena graph is no obstacle.
   - The db value wraps a Model or a Dataset and carries the prefixes and
     the conversion options, much as a Datomic db carries its schema.
-  - `q` takes Flint data or a SPARQL string, compiles it once and binds
-    values as nodes. Datomic-shaped queries (`:find`, `:in`, `:where`)
-    translated into Flint may come later.
+  - `q` takes the query first, as in Datomic: a SPARQL string, or a Jena
+    `Query` that `query` compiled once with the prefixes set before
+    parsing. It binds values as nodes. Flint stays outside the library,
+    and the README recommends it for queries as data. Datomic-shaped
+    queries (`:find`, `:in`, `:where`) may come later.
   - `pull` keeps Datomic's pattern syntax but is rebuilt on `entity`
     without OWL cardinality: a property with several values gives a set.
   - `entity` comes from DanNet's entity maps.
@@ -634,7 +635,8 @@ shape it:
 DanNet pins a commit, so nothing needs deprecating: it moves over in one
 go when it's ready.
 
-- The algebra DSL: `q/build`, the compiler and its specs. Flint replaces it.
+- The algebra DSL: `q/build`, the compiler and its specs. SPARQL replaces
+  it, written as strings or with Flint.
 - `validation`, which wraps the OWL reasoner's checks. SHACL replaces it.
 - The rule DSL in `inference`. Rules come as Jena rule text, as in DanNet.
 - The RDF/EDN reader, the `#rdf/prefix` reader tags, and the registry's
@@ -668,8 +670,8 @@ on DanNet's data.
 4. **Tooling**: deps.edn aliases, GitHub Actions on Java 21 and clj-kondo.
    Until step 7, only errors fail the lint in CI.
 5. **The API in the Design section**: the cljc value types, the db value
-   with its prefixes, `q` with Flint data or SPARQL strings and values
-   bound as nodes, `pull`, `entity` and `transact`. The algebra DSL goes.
+   with its prefixes, `q` with SPARQL strings and values bound as nodes,
+   `pull`, `entity` and `transact`. The algebra DSL goes.
    The tests must cover binding a blank node, which DanNet does to look up
    blank node entities.
 6. **The code from DanNet** in Part 5.
@@ -744,7 +746,7 @@ Answered by Simon on 22 October 2026:
 - **An API close to Datomic, Datalevin and Asami.** `pull` stays if it is
   generic.
 - **`q` takes Flint data or SPARQL strings.** Datomic-shaped queries may
-  come later.
+  come later. Reversed for Flint on 27 October.
 - **Model-driven**, with Jena's own prefix mapping and defaults that an
   option can replace.
 - **The list under "What goes"** stands, `reify` included.
@@ -763,6 +765,17 @@ Answered by Simon on 27 October 2026:
   IRI.
 - **Close to the standards and to Clojure idioms**, with the standard
   cited in the code that follows it.
+- **Flint stays outside the library.** `q` takes a SPARQL string or a
+  Jena `Query`, and the README recommends Flint for queries as data.
+  SPARQL is the standard, and Flint's bugs stay Flint's. Flint 0.3.1 also
+  depends on ClojureScript 1.10.914, which puts a 2021 Closure Compiler,
+  transit-clj 0.8.309 and jackson-core 2.8.7 on every JVM classpath.
+- **`q` takes the query first**, as in Datomic, and `query` compiles a
+  string once, with no hidden cache.
+- **`term` is tested in ClojureScript too**, as in langtag-clj.
+- **`transact` only adds in step 5.** Retracting comes in step 6 with
+  DanNet's `remove!`.
+- **Triple terms wait.** In step 5 they only get a clear error.
 
 
 Open questions
