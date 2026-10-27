@@ -168,6 +168,16 @@
     (is (= n3 (graph-size db "http://example.com/firm-resource"))
         "N3 from a resource, which may be in a jar")
     (is (zero? (graph-size db)))
+    (api/read! db [(io/file "test/foaf.rdf") "test/TheFirm.n3"] :ex/both)
+    (is (= (+ n3 (graph-size db "http://example.com/foaf"))
+           (graph-size db "http://example.com/both"))
+        "several files")
+    (is (thrown? Exception
+                 (api/read! db ["test/TheFirm.n3"
+                                (temp-file ".ttl" "<http://example.com/s> .")]
+                            :ex/half)))
+    (is (zero? (graph-size db "http://example.com/half"))
+        "a syntax error in one file adds none of them")
     (is (thrown-with-msg? ExceptionInfo #"No RDF syntax"
                           (api/read! db (temp-file ".txt" ""))))
     (is (thrown-with-msg? ExceptionInfo #"Not a syntax for one graph"

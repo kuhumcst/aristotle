@@ -200,32 +200,33 @@
      db)))
 
 (defn read!
-  "Read the RDF file at `source` into the default graph of `db`, or into the
-  named `graph`, and return `db`.
+  "Read the RDF file at `source`, or the files of a coll of sources, into the
+  default graph of `db`, or into the named `graph`, and return `db`.
 
-  The source is a File, a URL, a URI or a file path, and its name gives the
-  syntax, e.g. Turtle for .ttl. The whole file is parsed before anything is
+  A source is a File, a URL, a URI or a file path, and its name gives the
+  syntax, e.g. Turtle for .ttl. Every file is parsed before anything is
   added, so a syntax error leaves the db as it was."
   ([db source]
    (read! db source nil))
   ([db source graph]
-   (let [url  (io/as-url (if (string? source) (io/file source) source))
-         lang (RDFLanguages/filenameToLang (str url))
-         g    (GraphMemFactory/createDefaultGraph)]
-     (cond
-       (nil? lang)
-       (throw (ex-info (str "No RDF syntax for the name " url)
-                       {:source source}))
+   (let [g (GraphMemFactory/createDefaultGraph)]
+     (doseq [s (if (sequential? source) source [source])
+             :let [url  (io/as-url (if (string? s) (io/file s) s))
+                   lang (RDFLanguages/filenameToLang (str url))]]
+       (cond
+         (nil? lang)
+         (throw (ex-info (str "No RDF syntax for the name " url)
+                         {:source s}))
 
-       (RDFLanguages/isQuads lang)
-       (throw (ex-info (str "Not a syntax for one graph: " lang)
-                       {:source source})))
-     (with-open [in (io/input-stream url)]
-       (-> (RDFParser/create)
-           (.source in)
-           (.lang lang)
-           (.base (str url))
-           (.parse g)))
+         (RDFLanguages/isQuads lang)
+         (throw (ex-info (str "Not a syntax for one graph: " lang)
+                         {:source s})))
+       (with-open [in (io/input-stream url)]
+         (-> (RDFParser/create)
+             (.source in)
+             (.lang lang)
+             (.base (str url))
+             (.parse g))))
      (transact! db g graph))))
 
 (defn write
