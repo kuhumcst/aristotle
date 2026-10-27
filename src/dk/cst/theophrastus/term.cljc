@@ -1,4 +1,4 @@
-(ns arachne.aristotle.term
+(ns dk.cst.theophrastus.term
   "RDF terms as values that work the same in Clojure and ClojureScript.
 
   An IRI is a keyword when its prefix is known, e.g. :rdfs/label, and a

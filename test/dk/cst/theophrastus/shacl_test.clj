@@ -1,9 +1,9 @@
-(ns arachne.aristotle.shacl-test
+(ns dk.cst.theophrastus.shacl-test
   "SHACL validation of a db, with the report as Clojure data."
   (:require [clojure.test :refer [deftest is]]
-            [arachne.aristotle.api :as api]
-            [arachne.aristotle.shacl :as shacl]
-            [arachne.aristotle.term :as term])
+            [dk.cst.theophrastus :as theo]
+            [dk.cst.theophrastus.shacl :as shacl]
+            [dk.cst.theophrastus.term :as term])
   (:import [java.io File]
            [org.apache.jena.rdf.model ModelFactory]
            [org.apache.jena.shacl Shapes]
@@ -28,7 +28,7 @@
 (defn shapes-file
   "A temporary Turtle file with the `ttl`."
   ^File [ttl]
-  (doto (File/createTempFile "aristotle" ".ttl")
+  (doto (File/createTempFile "theophrastus" ".ttl")
     (.deleteOnExit)
     (spit ttl)))
 
@@ -42,9 +42,9 @@
 
 (deftest validate
   (let [shapes (shacl/parse (shapes-file shapes-ttl))]
-    (doseq [db [(api/db (ModelFactory/createDefaultModel) {:prefixes prefixes})
-                (api/db (TDB2Factory/createDataset) {:prefixes prefixes})]
-            :let [_      (api/transact! db data)
+    (doseq [db [(theo/db (ModelFactory/createDefaultModel) {:prefixes prefixes})
+                (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})]
+            :let [_      (theo/transact! db data)
                   result (shacl/validate db shapes)
                   jim    (first (filter #(= :ex/jim (:focus-node %))
                                         (:entries result)))]]
@@ -69,7 +69,7 @@
 
 (deftest parse
   (let [f      (shapes-file shapes-ttl)
-        mem-db #(api/read! (api/db (ModelFactory/createDefaultModel)) f)]
+        mem-db #(theo/read! (theo/db (ModelFactory/createDefaultModel)) f)]
     (is (instance? Shapes (shacl/parse f)) "a file")
     (is (instance? Shapes (shacl/parse [f (shapes-file "")])) "several files")
     (is (instance? Shapes (shacl/parse (mem-db))) "a db")

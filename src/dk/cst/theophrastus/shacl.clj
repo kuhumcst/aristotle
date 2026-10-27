@@ -1,10 +1,10 @@
-(ns arachne.aristotle.shacl
+(ns dk.cst.theophrastus.shacl
   "SHACL validation of a db, with the report as Clojure data.
 
   See https://www.w3.org/TR/shacl/"
-  (:require [arachne.aristotle.api :as api]
-            [arachne.aristotle.impl.convert :as convert]
-            [arachne.aristotle.txn :as txn])
+  (:require [dk.cst.theophrastus :as theo]
+            [dk.cst.theophrastus.impl.convert :as convert]
+            [dk.cst.theophrastus.txn :as txn])
   (:import [org.apache.jena.graph Graph Node]
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.shacl ShaclValidator Shapes ValidationReport]
@@ -13,16 +13,16 @@
 
 (defn parse
   "The Jena Shapes of `x`: a Graph, a Model, a db, or the file of a source,
-  or files of a coll of sources, as for api/read!."
+  or files of a coll of sources, as for theophrastus/read!."
   ^Shapes [x]
   (let [^Graph g (cond
                    (instance? Graph x) x
                    (instance? Model x) (.getGraph ^Model x)
-                   (map? x)            (api/jena-graph x nil)
+                   (map? x)            (theo/jena-graph x nil)
                    :else               (-> (ModelFactory/createDefaultModel)
-                                           (api/db)
-                                           (api/read! x)
-                                           (api/jena-graph nil)))]
+                                           (theo/db)
+                                           (theo/read! x)
+                                           (theo/jena-graph nil)))]
     (Shapes/parse g)))
 
 (defn- entry->map
@@ -57,7 +57,7 @@
    (let [prefixes (assoc prefixes :sh "<http://www.w3.org/ns/shacl#>")]
      (txn/calculate-read
        (or dataset model)
-       #(let [^Graph g                 (api/jena-graph db nil)
+       #(let [^Graph g                 (theo/jena-graph db nil)
               ^ValidationReport report (if (some? node)
                                          (.validate (ShaclValidator/get) shapes
                                                     g ^Node (convert/node

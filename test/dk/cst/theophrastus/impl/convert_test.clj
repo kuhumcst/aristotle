@@ -1,9 +1,9 @@
-(ns arachne.aristotle.impl.convert-test
+(ns dk.cst.theophrastus.impl.convert-test
   "Jena nodes to Clojure values and back, for each kind of term that DanNet
   writes or reads."
   (:require [clojure.test :refer [deftest is]]
-            [arachne.aristotle.impl.convert :as convert]
-            [arachne.aristotle.term :as term])
+            [dk.cst.theophrastus.impl.convert :as convert]
+            [dk.cst.theophrastus.term :as term])
   (:import [clojure.lang ExceptionInfo]
            [java.net URI]
            [java.time LocalDate OffsetDateTime]

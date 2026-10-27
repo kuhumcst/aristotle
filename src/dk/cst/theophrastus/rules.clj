@@ -1,8 +1,9 @@
-(ns arachne.aristotle.rules
+(ns dk.cst.theophrastus.rules
   "Jena's rule reasoner: rules, a reasoner of them, and an inference Model.
 
-  Pass the inference Model to api/db, and an entity of the db then has the
-  properties that the rules infer as :inferred in its metadata.
+  Pass the inference Model to theophrastus/db, and an entity of the db
+  then has the properties that the rules infer as :inferred in its
+  metadata.
 
   See https://jena.apache.org/documentation/inference/"
   (:import [java.util List]

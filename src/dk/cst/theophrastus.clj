@@ -1,10 +1,10 @@
-(ns arachne.aristotle.api
+(ns dk.cst.theophrastus
   "A db of a Jena Model or Dataset, in the style of Datomic: db, q, entity,
   pull, transact!, retract!, update!, read! and write. The functions that
   change a db end in !."
-  (:require [arachne.aristotle.impl.convert :as convert]
-            [arachne.aristotle.txn :as txn]
-            [arachne.aristotle.term :as term]
+  (:require [dk.cst.theophrastus.impl.convert :as convert]
+            [dk.cst.theophrastus.txn :as txn]
+            [dk.cst.theophrastus.term :as term]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import [java.io Writer]

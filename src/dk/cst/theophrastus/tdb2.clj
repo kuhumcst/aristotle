@@ -1,16 +1,16 @@
-(ns arachne.aristotle.tdb2
+(ns dk.cst.theophrastus.tdb2
   "TDB2 databases on disk: connecting and compacting."
-  (:require [arachne.aristotle.api :as api])
+  (:require [dk.cst.theophrastus :as theo])
   (:import [org.apache.jena.query Dataset]
            [org.apache.jena.tdb2 DatabaseMgr TDB2Factory]))
 
 (defn connect
   "The db of the TDB2 database in the directory `dir`, which TDB2 creates
-  when it doesn't exist, with the `opts` of api/db."
+  when it doesn't exist, with the `opts` of theophrastus/db."
   ([dir]
    (connect dir nil))
   ([dir opts]
-   (api/db (TDB2Factory/connectDataset (str dir)) opts)))
+   (theo/db (TDB2Factory/connectDataset (str dir)) opts)))
 
 (defn compact!
   "Compact the TDB2 database of `x`, a db or a Dataset, and delete the

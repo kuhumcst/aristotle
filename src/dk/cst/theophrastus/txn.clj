@@ -1,4 +1,4 @@
-(ns arachne.aristotle.txn
+(ns dk.cst.theophrastus.txn
   "Transactions on a Jena Graph, Model or Dataset, and a hard timeout.
 
   Each transaction calls a function of no arguments and returns what it

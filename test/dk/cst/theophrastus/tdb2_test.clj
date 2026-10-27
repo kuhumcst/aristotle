@@ -1,10 +1,10 @@
-(ns arachne.aristotle.tdb2-test
+(ns dk.cst.theophrastus.tdb2-test
   "Connecting to a TDB2 database on disk, and compacting it."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
-            [arachne.aristotle.api :as api]
-            [arachne.aristotle.tdb2 :as tdb2]
-            [arachne.aristotle.term :as term])
+            [dk.cst.theophrastus :as theo]
+            [dk.cst.theophrastus.tdb2 :as tdb2]
+            [dk.cst.theophrastus.term :as term])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [org.apache.jena.query Dataset]
@@ -20,18 +20,18 @@
   (TDBInternal/expel (.asDatasetGraph ^Dataset (:dataset db))))
 
 (deftest connect-and-compact
-  (let [dir (str (Files/createTempDirectory "aristotle"
+  (let [dir (str (Files/createTempDirectory "theophrastus"
                                             (make-array FileAttribute 0)))]
     (try
       (let [db (tdb2/connect dir {:prefixes prefixes})]
-        (api/transact! db [[:ex/s :ex/p "o"]])
+        (theo/transact! db [[:ex/s :ex/p "o"]])
         (release db))
       (let [db (tdb2/connect dir {:prefixes prefixes})]
-        (is (= {:ex/p "o"} (api/entity db :ex/s)) "the data is on disk")
-        (api/retract! db ['_ '_ '_])
-        (api/transact! db [[:ex/s :ex/p "new"]])
+        (is (= {:ex/p "o"} (theo/entity db :ex/s)) "the data is on disk")
+        (theo/retract! db ['_ '_ '_])
+        (theo/transact! db [[:ex/s :ex/p "new"]])
         (tdb2/compact! db)
-        (is (= {:ex/p "new"} (api/entity db :ex/s))
+        (is (= {:ex/p "new"} (theo/entity db :ex/s))
             "the data survives compacting")
         (is (.exists (io/file dir "Data-0002")))
         (is (not (.exists (io/file dir "Data-0001")))

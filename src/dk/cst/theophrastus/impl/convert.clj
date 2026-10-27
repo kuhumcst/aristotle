@@ -1,10 +1,10 @@
-(ns arachne.aristotle.impl.convert
+(ns dk.cst.theophrastus.impl.convert
   "Jena nodes to Clojure values and back, with the RDF terms of the term
   namespace."
-  (:require [arachne.aristotle.term :as term]
+  (:require [dk.cst.theophrastus.term :as term]
             [clojure.string :as str]
             [dk.simongray.langtag :as langtag])
-  (:import [arachne.aristotle.term LangStr Literal]
+  (:import [dk.cst.theophrastus.term LangStr Literal]
            [clojure.lang Keyword Symbol]
            [java.net URI]
            [java.util Map]

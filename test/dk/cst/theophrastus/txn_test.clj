@@ -1,8 +1,8 @@
-(ns arachne.aristotle.txn-test
+(ns dk.cst.theophrastus.txn-test
   "Transactions on each kind of Graph, Model and Dataset, and the hard
   timeout."
   (:require [clojure.test :refer [deftest is]]
-            [arachne.aristotle.txn :as txn])
+            [dk.cst.theophrastus.txn :as txn])
   (:import [clojure.lang ExceptionInfo]
            [java.util.concurrent Executors ExecutorService SynchronousQueue
             ThreadPoolExecutor TimeUnit TimeoutException]

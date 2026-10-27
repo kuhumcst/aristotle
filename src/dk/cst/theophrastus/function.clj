@@ -1,10 +1,10 @@
-(ns arachne.aristotle.function
+(ns dk.cst.theophrastus.function
   "SPARQL functions written in Clojure, registered with Jena's ARQ, so that
   any query can call them by their IRI.
 
   See https://jena.apache.org/documentation/query/writing_functions.html"
-  (:require [arachne.aristotle.impl.convert :as convert]
-            [arachne.aristotle.term :as term])
+  (:require [dk.cst.theophrastus.impl.convert :as convert]
+            [dk.cst.theophrastus.term :as term])
   (:import [org.apache.jena.graph Node]
            [org.apache.jena.sparql.engine.binding Binding]
            [org.apache.jena.sparql.expr Expr ExprEvalException ExprList

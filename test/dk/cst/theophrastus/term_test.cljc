@@ -1,10 +1,10 @@
-(ns arachne.aristotle.term-test
+(ns dk.cst.theophrastus.term-test
   "RDF terms as values, in Clojure and ClojureScript."
   (:require #?(:clj [clojure.string :as str])
             [clojure.test :refer [deftest is]]
             #?(:clj  [clojure.edn :as edn]
                :cljs [cljs.reader :as edn])
-            [arachne.aristotle.term :as term]))
+            [dk.cst.theophrastus.term :as term]))
 
 (def readers
   "The readers of the reader tags, for reading EDN."
