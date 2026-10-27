@@ -565,8 +565,11 @@ library was changed. Your other libraries are MIT.
 
 A Clojure library for Jena: RDF terms as Clojure data, graphs and
 datasets, SPARQL as strings or Flint data, transactions and timeouts, TDB2,
-rules, ARQ functions and SHACL. The decisions of 22 October shape it:
+rules, ARQ functions and SHACL. The decisions of 22 and 27 October
+shape it:
 
+- **Close to the standards and to Clojure idioms.** Code that follows a
+  rule from a standard cites the standard.
 - **An API like Datomic's**, which Datalevin and Asami share: a db value,
   `q`, `pull`, `entity` and `transact`. Datalevin isn't immutable either,
   so a live Jena graph is no obstacle.
@@ -582,15 +585,17 @@ rules, ARQ functions and SHACL. The decisions of 22 October shape it:
   a Model exposes them as a `PrefixMapping`, and TDB2 stores them on disk.
   So the library has no registry of its own. The prefixes come from a
   `default-prefixes` map, which an option can replace or extend, and the
-  library sets them on the Model. Turning IRIs into keywords needs a
-  cached index of the longest namespaces, since that happens for millions
-  of nodes.
+  library sets them on the Model. When they differ from the prefixes
+  stored in a TDB2 database, the ones passed in win. Turning IRIs into
+  keywords needs a cached index of the longest namespaces, since that
+  happens for millions of nodes.
 - **Every value works in CLJ and CLJS.** One cljc namespace holds the
   value types and the rules for converting RDF terms:
 
   | RDF term | CLJ | CLJS |
   |---|---|---|
   | IRI with a known prefix | keyword | keyword |
+  | IRI without a known prefix | `"<…>"` string | `"<…>"` string |
   | blank node | `_label` symbol | symbol |
   | xsd:string | string | string |
   | language-tagged string | `LangStr` | `LangStr` |
@@ -607,6 +612,19 @@ rules, ARQ functions and SHACL. The decisions of 22 October shape it:
   durations, custom datatypes and ill-formed literals, which then no
   longer throw, and it ends the leaking of Jena's `XSDDateTime` and
   `BaseDatatype$TypedValue`.
+
+  One rule tells a `"<…>"` string from text: SPARQL's IRIREF rule, plus
+  a scheme as RFC 3987 defines it. IRIREF bans the few characters that an
+  IRI can't contain, such as spaces and angle brackets, so every absolute
+  IRI passes the rule. Text that passes it, e.g. `"<urn:isbn:123>"`, has
+  to be wrapped in a `Literal` and reads back as one, so data makes the
+  round trip without loss. A string that fails it is text, even an IRI
+  with a space in it.
+- **A cljc protocol for resources.** It returns the full IRI that a value
+  stands for: a keyword through the prefixes, a `"<…>"` string, a
+  `java.net.URI` or a type of your own. Writing data uses it, so any type
+  that extends it can stand in a triple. In the browser, DanNet's
+  `rdf-resource?` and similar helpers can use it too.
 - **Public namespaces for separate concerns**: `shacl`, `rules` (reasoners
   and the asserted/inferred split), `tdb2` (connecting, compacting and
   importing) and `function` (ARQ functions), with `impl.*` for the rest.
@@ -735,15 +753,19 @@ Answered by Simon on 22 October 2026:
 - **No test aliases for older Jena versions.** DanNet goes straight to
   6.2, and the code no longer compiles on 4.5.
 
+Answered by Simon on 27 October 2026:
+
+- **The prefixes passed in win** over those stored in a TDB2 database.
+- **IRIs without a known prefix stay `"<…>"` strings**, as DanNet expects.
+  SPARQL's IRIREF rule with a scheme tells them from text, and a string
+  literal that passes the rule reads back as a `Literal`.
+- **A cljc protocol for resources**, so that any type can stand for an
+  IRI.
+- **Close to the standards and to Clojure idioms**, with the standard
+  cited in the code that follows it.
+
 
 Open questions
 --------------
 
-Needed before step 5:
-
-1. **IRIs without a known prefix.** Keep the `"<…>"` strings that DanNet
-   expects, or use a small type of our own, which ends the confusion with
-   string literals but changes the most code in DanNet?
-2. **Which prefixes win** when the ones stored in a TDB2 database differ
-   from the ones passed in? I suggest the ones passed in, written on
-   connect.
+None before step 5.
