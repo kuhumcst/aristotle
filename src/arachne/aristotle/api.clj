@@ -1,7 +1,7 @@
 (ns arachne.aristotle.api
-  "A db of a Jena Model or Dataset, in the style of Datomic: db, q,
-  transact and read. It takes the place of the root namespace when the old
-  API goes."
+  "A db of a Jena Model or Dataset, in the style of Datomic: db, q, entity,
+  pull, transact and read. It takes the place of the root namespace when
+  the old API goes."
   (:refer-clojure :exclude [read])
   (:require [arachne.aristotle.impl.convert :as convert]
             [arachne.aristotle.txn :as txn]
@@ -14,6 +14,7 @@
            [org.apache.jena.query Dataset DatasetFactory Query QueryFactory
             Syntax]
            [org.apache.jena.rdf.model Model ModelFactory]
+           [org.apache.jena.reasoner BaseInfGraph]
            [org.apache.jena.riot RDFLanguages RDFParser]
            [org.apache.jena.shared PrefixMapping PrefixMapping$Factory]
            [org.apache.jena.sparql.core DatasetGraph Var]
@@ -268,3 +269,129 @@
             :else (throw (ex-info (str "Not a SELECT, ASK, CONSTRUCT or "
                                        "DESCRIBE query: " bound)
                                   {:query bound}))))))))
+
+(def properties-query
+  "The query of the predicates and objects of ?s."
+  (query "SELECT ?p ?o WHERE { ?s ?p ?o }"))
+
+(defn- property-map
+  "The map of the predicate of each of the `rows` to its object, or to a set
+  of its objects when it has several."
+  [rows]
+  (reduce (fn [m {:syms [?p ?o]}]
+            (let [v (get m ?p ::none)]
+              (assoc m ?p (cond
+                            (= ::none v) ?o
+                            (set? v)     (conj v ?o)
+                            (= v ?o)     v
+                            :else        #{v ?o}))))
+          {}
+          rows))
+
+;; Concise Bounded Description (W3C Member Submission, 2005), section 2,
+;; without the reifications of its third step
+(defn- describe
+  "The property map of the `rows` of a subject in `db`, with each blank node
+  among the values replaced by the property map of its own rows, unless
+  it's one of the subjects `seen` on the way there."
+  [db rows seen]
+  (update-vals
+    (property-map rows)
+    (fn [v]
+      (let [expand (fn [x]
+                     (if (and (term/blank? x) (not (seen x)))
+                       (with-meta (describe db
+                                            (q properties-query db {'?s x})
+                                            (conj seen x))
+                         {:subject x})
+                       x))]
+        (if (set? v)
+          (into #{} (map expand) v)
+          (expand v))))))
+
+(defn- inferred
+  "The property map of the `rows` of `subject` in `db` that its inference
+  Model infers: those in neither its raw graph nor its schema."
+  [{:keys [^Model model prefixes] :as db} subject rows]
+  (let [^BaseInfGraph g (.getGraph model)
+        rows-in         #(q properties-query
+                            (->Db (ModelFactory/createModelForGraph %)
+                                  nil
+                                  prefixes)
+                            {'?s subject})
+        asserted        (into #{}
+                              (mapcat rows-in)
+                              (keep identity [(.getRawGraph g)
+                                              (.getSchemaGraph g)]))]
+    (property-map (remove asserted rows))))
+
+;; TODO: an option for one value or a set by a schema, as in Datomic, e.g.
+;; SHACL's sh:maxCount 1 or owl:FunctionalProperty, instead of by the data
+(defn entity
+  "The properties of `subject` in `db` as a map of predicate to value, or to
+  a set of values when it has several, and {} when it has none.
+
+  A blank node among the values becomes a map of its own properties, and
+  so on, as in a Concise Bounded Description. The metadata of each map has
+  its :subject. For a db of an inference Model, the metadata of the entity
+  also has the :inferred properties: those in neither the raw graph nor the
+  schema. The entity is read in one read transaction."
+  [{:keys [^Model model ^Dataset dataset] :as db} subject]
+  (txn/calculate-read
+    (or dataset model)
+    #(let [rows (q properties-query db {'?s subject})]
+       (with-meta (describe db rows #{subject})
+         (cond-> {:subject subject}
+           (and model (instance? BaseInfGraph (.getGraph model)))
+           (assoc :inferred (inferred db subject rows)))))))
+
+(defn- pull*
+  "The part of the entity `x` in `db` that the `pattern` selects, with its
+  :rdf/about, at the `depth` of recursion, past the subjects `seen`. The
+  entity is a subject, or the map of a blank node that entity expanded."
+  [db pattern x depth seen]
+  (let [e (if (map? x) x (entity db x))]
+    (when (seq e)
+      (let [subject (if (map? x) (:subject (meta x)) x)
+            seen    (conj seen subject)
+            wild?   (some #{'*} pattern)
+            attrs   (set (remove #(or (map? %) (= '* %)) pattern))
+            nested  (apply merge (filter map? pattern))
+            pull-v  (fn [spec v]
+                      (let [id (if (map? v) (:subject (meta v)) v)]
+                        (or (when (or (map? v) (keyword? v) (term/blank? v)
+                                      (term/iri-string? v))
+                              (cond
+                                (vector? spec)
+                                (pull* db spec v 0 #{})
+
+                                (and (not (seen id))
+                                     (or (= '... spec) (< depth spec)))
+                                (pull* db pattern v (inc depth) seen)))
+                            v)))]
+        (reduce-kv (fn [m p v]
+                     (if-let [spec (get nested p)]
+                       (assoc m p (if (set? v)
+                                    (into #{} (map #(pull-v spec %)) v)
+                                    (pull-v spec v)))
+                       (if (or wild? (attrs p))
+                         (assoc m p v)
+                         m)))
+                   {:rdf/about subject}
+                   e)))))
+
+(defn pull
+  "The properties of `subject` in `db` that the `pattern` selects, in the
+  style of Datomic's pull, with :rdf/about for the subject, or nil when it
+  has none. The pattern is a vector of:
+
+  - a predicate, e.g. :rdfs/label, for its values;
+  - '*, for every predicate;
+  - a map of predicate to what to pull from its values: a pattern of its
+    own, e.g. {:ex/friend [:ex/name]}, '... for this pattern again at any
+    depth, or a number for this pattern again at most that many times.
+
+  A predicate has its value, or a set of values when it has several. A
+  recursion stops at a subject that it has already pulled on its way."
+  [db pattern subject]
+  (pull* db pattern subject 0 #{}))

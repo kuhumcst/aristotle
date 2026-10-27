@@ -41,6 +41,13 @@
   (and (string? x)
        (some? (re-matches iri-re x))))
 
+(defn blank?
+  "Whether `x` is a blank node, a symbol such as _b1."
+  [x]
+  (and (symbol? x)
+       (nil? (namespace x))
+       (str/starts-with? (name x) "_")))
+
 (defprotocol Resource
   "A value that stands for an IRI. Extend it only to a type that keeps the
   IRI exactly as written. java.net.URL, js/URL and goog.Uri all change

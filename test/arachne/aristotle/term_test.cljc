@@ -32,6 +32,13 @@
   (is (not (term/iri-string? "https://cst.dk")))
   (is (not (term/iri-string? :rdfs/label))))
 
+(deftest blank?
+  (is (term/blank? '_b1))
+  (is (term/blank? '_))
+  (is (not (term/blank? '?x)))
+  (is (not (term/blank? 'a/_b1)))
+  (is (not (term/blank? "_b1"))))
+
 (deftest iri
   (let [prefixes (assoc term/default-prefixes :dn "<https://wordnet.dk/dannet/data/>")]
     (is (= "https://wordnet.dk/dannet/data/synset-1"

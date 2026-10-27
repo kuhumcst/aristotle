@@ -276,3 +276,109 @@
                  (api/q "SELECT * WHERE { ?a ?p ?w . ?b ?p ?x . ?c ?p ?y }"
                         db nil {:timeout 50}))
         "a million rows take longer than 50 ms")))
+
+(def people
+  "The data of Aristotle's pull test, as triples."
+  [[:ex/luke :ex/name "Luke"]
+   [:ex/luke :ex/age 32]
+   [:ex/luke :ex/eyes "blue"]
+   [:ex/luke :ex/spouse :ex/hannah]
+   [:ex/hannah :ex/name "Hannah"]
+   [:ex/luke :ex/friends :ex/jim]
+   [:ex/luke :ex/friends :ex/jamie]
+   [:ex/jim :ex/name "Jim"]
+   [:ex/jim :ex/friends :ex/sara]
+   [:ex/sara :ex/name "Sara"]
+   [:ex/sara :ex/friends :ex/thom]
+   [:ex/thom :ex/name "Thom"]
+   [:ex/thom :ex/friends :ex/luke]
+   [:ex/jamie :ex/name "Jamie"]
+   [:ex/luke :ex/address '_address]
+   ['_address :ex/city "Copenhagen"]
+   ['_address :ex/building '_building]
+   ['_building :ex/floor 3]
+   [:ex/loop :ex/start '_c1]
+   ['_c1 :ex/next '_c2]
+   ['_c2 :ex/next '_c1]])
+
+(defn people-dbs
+  "A db of an in-memory Model and one of TDB2, both with the people."
+  []
+  [(api/transact (api/db (ModelFactory/createDefaultModel) {:prefixes prefixes})
+                 people)
+   (api/transact (api/db (TDB2Factory/createDataset) {:prefixes prefixes})
+                 people)])
+
+(deftest entity
+  (doseq [db (people-dbs)
+          :let [luke (api/entity db :ex/luke)]]
+    (is (= "Luke" (:ex/name luke)) "one value")
+    (is (= #{:ex/jim :ex/jamie} (:ex/friends luke)) "a set of several values")
+    (is (= :ex/luke (:subject (meta luke))))
+    (is (= {:ex/city     "Copenhagen"
+            :ex/building {:ex/floor 3}}
+           (:ex/address luke))
+        "blank nodes become maps, as in a Concise Bounded Description")
+    (is (= '_address (:subject (meta (:ex/address luke)))))
+    (is (= {:ex/next {:ex/next '_c1}}
+           (:ex/start (api/entity db :ex/loop)))
+        "a cycle of blank nodes stops at the first one seen again")
+    (is (= {} (api/entity db :ex/nobody)))
+    (is (nil? (:inferred (meta luke))) "no inference model")))
+
+(deftest inferred-entity
+  (let [schema [[:ex/Dog :rdfs/subClassOf :ex/Animal]]
+        data   [[:ex/rex :rdf/type :ex/Dog] [:ex/rex :ex/name "Rex"]]
+        mem-db #(api/db (ModelFactory/createDefaultModel) {:prefixes prefixes})
+        rdfs   #(ModelFactory/createInfModel
+                  (ReasonerRegistry/getRDFSReasoner)
+                  (:model (api/transact (mem-db) schema))
+                  ^Model %)
+        tdb2   (TDB2Factory/createDataset)]
+    ;; the union model of TDB2 has the named graphs, not the default one
+    (api/transact (api/db tdb2 {:prefixes prefixes}) data :ex/g)
+    (doseq [model [(rdfs (:model (api/transact (mem-db) data)))
+                   (rdfs (.getUnionModel tdb2))]
+            :let [rex      (api/entity (api/db model {:prefixes prefixes})
+                                       :ex/rex)
+                  inferred (:inferred (meta rex))
+                  types    #(let [t (:rdf/type %)] (if (set? t) t #{t}))]]
+      (is (contains? (types rex) :ex/Animal))
+      (is (contains? (types inferred) :ex/Animal))
+      (is (not (contains? (types inferred) :ex/Dog)) "asserted in the data")
+      (is (not (contains? inferred :ex/name))))))
+
+(deftest pull
+  (doseq [db (people-dbs)]
+    (is (= {:rdf/about :ex/luke
+            :ex/name   "Luke"
+            :ex/spouse :ex/hannah
+            :ex/age    32}
+           (api/pull db [:ex/spouse :ex/name :ex/age] :ex/luke))
+        "one value each, without OWL cardinality")
+    (is (= #{:rdf/about :ex/name :ex/age :ex/eyes :ex/spouse :ex/friends
+             :ex/address}
+           (set (keys (api/pull db [:ex/name '*] :ex/luke)))))
+    (is (nil? (api/pull db [:ex/name] :ex/poseidon)))
+    (is (= {:rdf/about  :ex/luke
+            :ex/friends #{{:rdf/about :ex/jim :ex/name "Jim"}
+                          {:rdf/about :ex/jamie :ex/name "Jamie"}}
+            :ex/spouse  {:rdf/about :ex/hannah :ex/name "Hannah"}}
+           (api/pull db [{:ex/spouse [:ex/name] :ex/friends [:ex/name]}]
+                     :ex/luke))
+        "nested patterns")
+    (is (= {:rdf/about   :ex/luke
+            :ex/address  {:rdf/about '_address :ex/city "Copenhagen"}}
+           (api/pull db [{:ex/address [:ex/city]}] :ex/luke))
+        "a nested pattern on a blank node")
+    (let [friend-of (fn [e n]
+                      (first (filter #(= n (:ex/name %)) (:ex/friends e))))
+          jim       #(friend-of
+                       (api/pull db [:ex/name {:ex/friends %}] :ex/luke)
+                       "Jim")]
+      (is (= :ex/thom (-> (jim 2) :ex/friends :ex/friends))
+          "limited recursion")
+      (is (= "Thom" (-> (jim '...) :ex/friends :ex/friends :ex/name))
+          "unlimited recursion")
+      (is (= :ex/luke (-> (jim '...) :ex/friends :ex/friends :ex/friends))
+          "a recursion stops at a subject already pulled"))))
