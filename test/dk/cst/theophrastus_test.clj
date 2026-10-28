@@ -105,7 +105,7 @@
         inf (ModelFactory/createInfModel (ReasonerRegistry/getRDFSReasoner)
                                          (.getUnionModel ds))]
     (is (some? (theo/db inf {:prefixes prefixes}))
-        "an inference model on a TDB2 union model, as DanNet has")))
+        "an inference model on the union model of a TDB2 dataset")))
 
 (deftest transact-model
   (let [m  (ModelFactory/createDefaultModel)
@@ -230,7 +230,7 @@
       (is (zero? (graph-size db "http://example.com/broken"))))))
 
 (def label-data
-  "The triples of the pinned query tests, which DanNet's queries resemble."
+  "The triples of the pinned query tests."
   [[:ex/a :rdfs/label (term/->LangString "hund" "da")]
    [:ex/a :ex/count 2]
    [:ex/a :ex/part '_part]

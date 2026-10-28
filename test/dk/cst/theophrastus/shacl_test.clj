@@ -15,7 +15,7 @@
 
 (def shapes-ttl
   "A person needs a name, which is an error, and has at most one age, which
-  is a warning. The property shapes have IRIs, as in DanNet."
+  is a warning. The property shapes have IRIs rather than blank nodes."
   "PREFIX ex: <http://example.com/>
    PREFIX sh: <http://www.w3.org/ns/shacl#>
    PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>

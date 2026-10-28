@@ -1,6 +1,5 @@
 (ns dk.cst.theophrastus.convert-test
-  "Jena nodes to Clojure values and back, for each kind of term that DanNet
-  writes or reads."
+  "Jena nodes to Clojure values and back, for each kind of RDF term."
   (:require [clojure.test :refer [deftest is]]
             [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.term :as term])
@@ -12,12 +11,12 @@
            [org.apache.jena.sparql.util NodeFactoryExtra]))
 
 (def prefixes
-  "The default prefixes, one of DanNet's, and two namespaces, one inside
-  the other."
+  "The default prefixes, a namespace with a path, and two namespaces, one
+  inside the other."
   (assoc term/default-prefixes
-    :dn  "<https://wordnet.dk/dannet/data/>"
-    :ex  "<http://example.com/>"
-    :exa "<http://example.com/a/>"))
+    :data "<https://example.org/data/>"
+    :ex   "<http://example.com/>"
+    :exa  "<http://example.com/a/>"))
 
 (def xsd
   "The XSD namespace, for datatype IRIs."
@@ -47,8 +46,8 @@
     s))
 
 (deftest clojure->iri
-  (is (= "https://wordnet.dk/dannet/data/synset-1"
-         (.getURI (convert/node :dn/synset-1 prefixes))))
+  (is (= "https://example.org/data/item-1"
+         (.getURI (convert/node :data/item-1 prefixes))))
   (is (= "http://example.com/x"
          (.getURI (convert/node "<http://example.com/x>" prefixes))))
   (is (= "http://example.com/x"
@@ -109,7 +108,7 @@
   (is (thrown? ExceptionInfo (convert/node 'a/_b1 prefixes))))
 
 (deftest iri->clojure
-  (is (= :dn/synset-1 (->data "<https://wordnet.dk/dannet/data/synset-1>")))
+  (is (= :data/item-1 (->data "<https://example.org/data/item-1>")))
   (is (= "<http://nowhere.example/x>" (->data "<http://nowhere.example/x>")))
   (is (= :ex/x (->data "<http://example.com/x>")))
   (is (= :exa/b (->data "<http://example.com/a/b>")) "the longest namespace")
@@ -176,7 +175,7 @@
                                       prefixes))))
 
 (deftest round-trip
-  (doseq [s ["<https://wordnet.dk/dannet/data/synset-1>"
+  (doseq [s ["<https://example.org/data/item-1>"
              "<http://nowhere.example/x>"
              "<http://example.com/a/b/c>"
              "<http://example.com/>"

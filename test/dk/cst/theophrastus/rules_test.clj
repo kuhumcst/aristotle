@@ -62,7 +62,7 @@
   (is (thrown-with-msg? ExceptionInfo #"Not a mode"
                         (rules/reasoner [] {:mode :sideways}))))
 
-(deftest dannet-setup
+(deftest tdb2-union-inference
   (let [ds       (TDB2Factory/createDataset)
         _        (-> (theo/db ds {:prefixes prefixes})
                      (theo/named-graph :ex/g)
@@ -74,7 +74,7 @@
                                           (.getUnionModel ds))
                          {:prefixes prefixes})]
     (is (= {:ex/knows :ex/a} (:inferred (meta (theo/entity db :ex/b))))
-        "an inference Model on the union of a TDB2 dataset, as in DanNet")))
+        "an inference Model on the union of a TDB2 dataset")))
 
 (deftest rule-sets
   (is (seq rules/owl-rules))

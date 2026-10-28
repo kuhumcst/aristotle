@@ -40,11 +40,12 @@
   (is (not (term/blank-node? "_b1"))))
 
 (deftest iri
-  (let [prefixes (assoc term/default-prefixes :dn "<https://wordnet.dk/dannet/data/>")]
-    (is (= "https://wordnet.dk/dannet/data/synset-1"
-           (term/iri :dn/synset-1 prefixes)))
+  (let [prefixes (assoc term/default-prefixes
+                   :data "<https://example.org/data/>")]
+    (is (= "https://example.org/data/item-1"
+           (term/iri :data/item-1 prefixes)))
     (is (= (str xsd "string") (term/iri :xsd/string term/default-prefixes)))
-    (is (nil? (term/iri :dn/synset-1 term/default-prefixes))
+    (is (nil? (term/iri :data/item-1 term/default-prefixes))
         "a keyword whose prefix isn't known")
     (is (nil? (term/iri :label prefixes)))
     (is (= "https://cst.dk" (term/iri "<https://cst.dk>" prefixes)))

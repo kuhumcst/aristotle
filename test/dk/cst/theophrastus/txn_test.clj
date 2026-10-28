@@ -25,9 +25,9 @@
   (ModelFactory/createInfModel (ReasonerRegistry/getRDFSReasoner) ^Model m))
 
 (def tdb2-cases
-  "Each kind of TDB2 Dataset and Model that DanNet uses, with a function of
-  a new TDB2 dataset that returns [x g]: what the transaction is on, and
-  the graph that it writes to."
+  "Each kind of TDB2 Dataset and Model, with a function of a new TDB2
+  dataset that returns [x g]: what the transaction is on, and the graph
+  that it writes to."
   [["a TDB2 Dataset"
     (fn [^Dataset ds] [ds (.getGraph (.getDefaultModel ds))])]
    ["a Model of its default graph"
@@ -48,7 +48,7 @@
                           (.getNamedModel ds "http://example.com/g"))))
     (is (identical? dsg (txn/transactional (.getUnionModel ds))))
     (is (identical? dsg (txn/transactional (inference (.getUnionModel ds))))
-        "an inference model on the union model, as in DanNet"))
+        "an inference model on the union model"))
   (is (some? (txn/transactional (DatasetFactory/createTxnMem))))
   (is (nil? (txn/transactional (ModelFactory/createDefaultModel))))
   (is (nil? (txn/transactional (inference (ModelFactory/createDefaultModel)))))
