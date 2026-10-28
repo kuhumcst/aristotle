@@ -46,18 +46,17 @@ The term namespace also works in ClojureScript. In shadow-cljs a Git
 dependency only works through `deps.edn`, so set `:deps true` in your
 `shadow-cljs.edn` too.
 
-Make a db of a Jena Dataset, here one in memory, and write some data to it:
+Make a db in memory and write some data to it:
 
 ```clojure
 (require '[dk.cst.theophrastus :as theo]
          '[dk.cst.theophrastus.term :as term])
-(import '[org.apache.jena.query DatasetFactory])
 
 (def prefixes
   (assoc term/default-prefixes :ex "<http://example.com/>"))
 
 (def db
-  (theo/db (DatasetFactory/createTxnMem) {:prefixes prefixes}))
+  (theo/db {:prefixes prefixes}))
 
 (theo/transact! db [{:rdf/about  :ex/alice
                      :rdfs/label "Alice"
@@ -291,9 +290,9 @@ transaction, use the txn namespace:
        (theo/transact! [[:ex/alice :rdfs/label "Alice Smith"]])))
 ```
 
-A plain in-memory Model has no transactions, so other threads see a write
-as it happens, and a failure partway through doesn't undo it. For a store
-in memory with transactions, use `DatasetFactory/createTxnMem` as above.
+The db that `theo/db` makes in memory has transactions. If you pass it a
+plain in-memory Model instead, other threads see each write as it happens,
+and a failure partway through doesn't undo it.
 
 Connect to a TDB2 database with `tdb2/connect`, which creates it when the
 directory doesn't exist:

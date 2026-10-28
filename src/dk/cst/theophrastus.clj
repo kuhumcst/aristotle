@@ -40,11 +40,17 @@
   - :prefixes, the prefixes of the IRIs that become keywords, in the shape
     of term/default-prefixes, which it is unless given.
 
-  A Graph is used through a Model of it, and a DatasetGraph through a
-  Dataset, without copying. The prefixes replace those of `x` where they
-  differ, which for TDB2 writes them to disk."
+  With no `x`, it returns the db of a new in-memory Dataset with
+  transactions. A Graph is used through a Model of it, and a DatasetGraph
+  through a Dataset, without copying. The prefixes replace those of `x`
+  where they differ, which for TDB2 writes them to disk."
+  ([]
+   (db {}))
   ([x]
-   (db x nil))
+   ;; a Db is a map too, but not one of options
+   (if (and (map? x) (not (record? x)))
+     (db (DatasetFactory/createTxnMem) x)
+     (db x nil)))
   ([x {:keys [prefixes] :or {prefixes term/default-prefixes} :as opts}]
    (cond
      (instance? Graph x)

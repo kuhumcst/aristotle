@@ -12,7 +12,7 @@ name:
 
 | Aristotle                                | Theophrastus                          |
 |------------------------------------------|---------------------------------------|
-| `(aa/graph :simple)`                     | `theo/db` of a Jena Model or Dataset  |
+| `(aa/graph :simple)`                     | `(theo/db)`                           |
 | `(aa/graph :jena-rules rules)`           | `theo/db` of a `rules/->inf-model`    |
 | `(aa/graph :jena-mini)`                  | the same, with `rules/mini-rules`     |
 | `aa/add`                                 | `theo/transact!`                      |

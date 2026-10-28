@@ -62,10 +62,21 @@
                         (theo/db (ModelFactory/createDefaultModel)
                                 {:prefixes {:ex "http://example.com/"}})))
   (is (thrown-with-msg? ExceptionInfo #"Not a Model, Dataset or Graph"
-                        (theo/db {})))
+                        (theo/db (theo/db)))
+      "a db is a map, but not one of options")
   (is (= "#object[dk.cst.theophrastus.Db \"a Model with 4 prefixes\"]"
          (pr-str (theo/db (ModelFactory/createDefaultModel))))
       "a db doesn't print the triples of its Model"))
+
+(deftest in-memory-db
+  (is (= term/default-prefixes (:prefixes (theo/db))))
+  (let [db (theo/db {:prefixes prefixes})]
+    (is (instance? Dataset (:dataset db)))
+    (theo/transact! db [[:ex/s :ex/p "o"]])
+    (is (thrown? ExceptionInfo
+                 (theo/transact! db [[:ex/s :ex/p "q"]
+                                   [:ex/s :ex/p (term/->LangStr "x" "en_US")]])))
+    (is (= 1 (graph-size db)) "a failed write is undone")))
 
 (deftest tdb2-prefixes
   (let [dir     (str (Files/createTempDirectory "theophrastus"
