@@ -278,17 +278,31 @@ Transactions and TDB2
 
 The functions that end in `!` each write in one transaction, and `theo/q`
 and `theo/entity` each read in one. To run several functions in one
-transaction, use the txn namespace:
+transaction, use the macros of the txn namespace:
 
 ```clojure
 (require '[dk.cst.theophrastus.txn :as txn])
 
-(txn/calculate-write
-  (:dataset db)
-  #(-> db
-       (theo/retract! [[:ex/alice :rdfs/label '_]])
-       (theo/transact! [[:ex/alice :rdfs/label "Alice Smith"]])))
+(txn/with-write-transaction (:dataset db)
+  (theo/retract! db [[:ex/alice :rdfs/label '_]])
+  (theo/transact! db [[:ex/alice :rdfs/label "Alice Smith"]]))
 ```
+
+`txn/with-read-transaction` does the same for reads. For a block that only
+writes some of the time, `txn/with-transaction` runs it in a transaction
+that starts as a read and becomes a write at the first write:
+
+```clojure
+(txn/with-transaction (:dataset db)
+  (when (empty? (theo/entity db :ex/bob))
+    (theo/transact! db [[:ex/bob :rdfs/label "Bob"]])))
+```
+
+That first write fails if another one has committed since the transaction
+began, so a block that always writes is better off with
+`txn/with-write-transaction`. Each macro has a function that takes a
+function of no arguments instead: `txn/calculate-write`,
+`txn/calculate-read` and `txn/calculate`.
 
 The db that `theo/db` makes in memory has transactions. If you pass it a
 plain in-memory Model instead, other threads see each write as it happens,

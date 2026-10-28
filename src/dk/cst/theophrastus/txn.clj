@@ -1,12 +1,14 @@
 (ns dk.cst.theophrastus.txn
   "Transactions on a Jena Graph, Model or Dataset, and a hard timeout.
 
-  Each transaction calls a function of no arguments and returns what it
+  Each kind of transaction has a function that calls a function of no
+  arguments, e.g. calculate-read, and a macro that runs a body, e.g.
+  with-read-transaction. Either returns what the function or the body
   returns. A Graph or Model of a dataset, e.g. TDB2, uses the transactions
   of that dataset, also under an inference graph. A plain in-memory graph
-  has none, so the function runs as it is: other threads can see its
-  writes, and a failure partway through doesn't undo them. For an
-  in-memory store with transactions, use DatasetFactory/createTxnMem."
+  has none, so the code runs as it is: other threads can see its writes,
+  and a failure partway through doesn't undo them. For an in-memory store
+  with transactions, use DatasetFactory/createTxnMem."
   (:import [java.util.concurrent ExecutionException ExecutorService Future
             RejectedExecutionException TimeUnit TimeoutException]
            [java.util.function Supplier]
@@ -31,6 +33,7 @@
     :else (throw (ex-info (str "Not a Graph, Model or Dataset: " x)
                           {:x x}))))
 
+;; named after the methods of Jena's Txn that they call
 (defn calculate
   "Call `f` in a transaction on `x` and return what it returns. The
   transaction starts as a read and becomes a write when `f` writes. That
@@ -55,27 +58,51 @@
     (Txn/calculateWrite t ^Supplier f)
     (f)))
 
+;; named after next.jdbc's with-transaction
+(defmacro with-transaction
+  "Run `body` in a transaction on `x` and return its value. The transaction
+  starts as a read and becomes a write when `body` writes, as calculate's
+  does. Inside a read transaction it throws, even when `body` only reads, so
+  code that may run in one is better off with with-read-transaction."
+  [x & body]
+  `(calculate ~x (fn [] ~@body)))
+
+(defmacro with-read-transaction
+  "Run `body` in a read transaction on `x` and return its value, as
+  calculate-read does."
+  [x & body]
+  `(calculate-read ~x (fn [] ~@body)))
+
+(defmacro with-write-transaction
+  "Run `body` in a write transaction on `x` and return its value, as
+  calculate-write does."
+  [x & body]
+  `(calculate-write ~x (fn [] ~@body)))
+
 ;; Jena's own query timeout only takes effect when the query moves on to
 ;; the next result, and a rule reasoner can spend minutes before it does
-(defn with-hard-timeout
-  "Call `f` on `executor` and return what it returns. Throw a
-  TimeoutException after `timeout` milliseconds, or when the executor
-  rejects `f`. An exception from `f` is thrown as it is.
+(defmacro with-hard-timeout
+  "Run `body` on `executor` and return its value. Throw a TimeoutException
+  after `timeout` milliseconds, or when the executor rejects `body`. An
+  exception from `body` is thrown as it is.
 
-  The thread that runs `f` is left to finish, since interrupting it would
+  The thread that runs `body` is left to finish, since interrupting it would
   make Java close TDB2's file channels for good. An executor with a queue
   lets a call wait there until its timeout runs out. Only one without a
   queue rejects a call when all its threads are busy."
-  [^ExecutorService executor timeout f]
-  (let [^Future fut (try
-                      (.submit executor ^Callable f)
-                      (catch RejectedExecutionException _
-                        (throw (TimeoutException.
-                                 "The executor rejected the call"))))]
-    (try
-      (.get fut timeout TimeUnit/MILLISECONDS)
-      (catch TimeoutException e
-        (.cancel fut false)
-        (throw e))
-      (catch ExecutionException e
-        (throw (.getCause e))))))
+  [executor timeout & body]
+  `(let [^ExecutorService executor# ~executor
+         timeout# ~timeout
+         ^Callable f# (fn [] ~@body)
+         ^Future fut# (try
+                        (.submit executor# f#)
+                        (catch RejectedExecutionException _#
+                          (throw (TimeoutException.
+                                   "The executor rejected the call"))))]
+     (try
+       (.get fut# timeout# TimeUnit/MILLISECONDS)
+       (catch TimeoutException e#
+         (.cancel fut# false)
+         (throw e#))
+       (catch ExecutionException e#
+         (throw (.getCause e#))))))

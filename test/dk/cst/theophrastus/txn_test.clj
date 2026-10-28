@@ -62,6 +62,14 @@
     (is (= [TxnType/WRITE ReadWrite/WRITE] (txn/calculate-write x types)) label)
     (is (= [TxnType/READ ReadWrite/READ] (txn/calculate-read x types)) label)
     (is (= [TxnType/READ_PROMOTE ReadWrite/READ] (txn/calculate x types))
+        label)
+    (is (= [TxnType/READ_PROMOTE ReadWrite/READ]
+           (txn/with-transaction x (types)))
+        label)
+    (is (= [TxnType/READ ReadWrite/READ] (txn/with-read-transaction x (types)))
+        label)
+    (is (= [TxnType/WRITE ReadWrite/WRITE]
+           (txn/with-write-transaction x (types)))
         label)))
 
 (deftest rollback-and-promotion
@@ -82,7 +90,10 @@
         write #(txn/calculate-write m (constantly :ok))]
     (is (= :ok (txn/calculate-write ds write)) "a write in a write joins it")
     (is (thrown? Exception (txn/calculate-read ds write))
-        "a write in a read")))
+        "a write in a read")
+    (is (thrown? Exception
+                 (txn/calculate-read ds #(txn/with-transaction m :ok)))
+        "a transaction that can become a write, in a read")))
 
 (deftest no-transactions
   (let [m (ModelFactory/createDefaultModel)
@@ -96,13 +107,13 @@
 (deftest hard-timeout
   (let [^ExecutorService executor (Executors/newFixedThreadPool 1)]
     (try
-      (is (= :ok (txn/with-hard-timeout executor 1000 (constantly :ok))))
+      (is (= :ok (txn/with-hard-timeout executor 1000 :ok)))
       (is (thrown-with-msg? ExceptionInfo #"boom"
                             (txn/with-hard-timeout
-                              executor 1000 #(throw (ex-info "boom" {}))))
-          "the exception from f, not an ExecutionException")
+                              executor 1000 (throw (ex-info "boom" {}))))
+          "the exception from the body, not an ExecutionException")
       (is (thrown? TimeoutException
-                   (txn/with-hard-timeout executor 50 #(Thread/sleep 1000))))
+                   (txn/with-hard-timeout executor 50 (Thread/sleep 1000))))
       (finally
         (.shutdownNow executor))))
   (let [executor (ThreadPoolExecutor. 1 1 0 TimeUnit/MILLISECONDS
@@ -110,8 +121,7 @@
     (try
       (.submit executor ^Callable #(Thread/sleep 500))
       (is (thrown-with-msg? TimeoutException #"rejected"
-                            (txn/with-hard-timeout
-                              executor 1000 (constantly :ok)))
+                            (txn/with-hard-timeout executor 1000 :ok))
           "an executor without a queue, whose only thread is busy")
       (finally
         (.shutdownNow executor)))))
