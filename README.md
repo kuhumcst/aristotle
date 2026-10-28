@@ -132,6 +132,11 @@ To write such a value, pass it as it is, or turn it into a Literal with
 ;; => #rdf/literal ["2024-01-02" "<http://www.w3.org/2001/XMLSchema#date>"]
 ```
 
+To write values of a type of your own, extend `term/Resource` when the type
+stands for an IRI, or `term/AsLiteral` when it has a literal. Both also work
+in ClojureScript. For any other RDF term, extend `convert/AsNode`, which
+turns a value into a Jena node.
+
 Writing
 -------
 
@@ -214,7 +219,7 @@ moves on to its next result, so for a hard limit, see
 `txn/with-hard-timeout`.
 
 Where you run a query with Jena's own API, e.g. to keep its ResultSet,
-`theo/data` turns each Jena node in the results into the value that
+`convert/data` turns each Jena node in the results into the value that
 `theo/q` would return.
 
 To write queries as data, add [Flint](https://github.com/yetanalytics/flint)
@@ -388,10 +393,6 @@ clojure -T:build jar           # a jar in target
 ```
 
 CI also lints `src` and `test` with clj-kondo.
-
-The public namespaces are the root, `term`, `txn`, `tdb2`, `rules`,
-`function` and `shacl`. The internal one is `impl.convert`, which converts
-between Jena nodes and Clojure values.
 
 License
 -------

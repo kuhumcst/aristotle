@@ -3,7 +3,7 @@
   any query can call them by their IRI.
 
   See https://jena.apache.org/documentation/query/writing_functions.html"
-  (:require [dk.cst.theophrastus.impl.convert :as convert]
+  (:require [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.term :as term])
   (:import [org.apache.jena.graph Node]
            [org.apache.jena.sparql.engine.binding Binding]

@@ -3,7 +3,7 @@
 
   See https://www.w3.org/TR/shacl/"
   (:require [dk.cst.theophrastus :as theo]
-            [dk.cst.theophrastus.impl.convert :as convert]
+            [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.txn :as txn])
   (:import [org.apache.jena.graph Graph Node]
            [org.apache.jena.rdf.model Model ModelFactory]

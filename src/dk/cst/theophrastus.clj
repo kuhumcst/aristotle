@@ -2,7 +2,7 @@
   "A db of a Jena Model or Dataset, in the style of Datomic: db, q, entity,
   pull, transact!, retract!, update!, read! and write. The functions that
   change a db end in !."
-  (:require [dk.cst.theophrastus.impl.convert :as convert]
+  (:require [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.txn :as txn]
             [dk.cst.theophrastus.term :as term]
             [clojure.java.io :as io]
@@ -299,16 +299,6 @@
              (.setPrefixMapping (convert/prefix-mapping prefixes)))]
      (QueryFactory/parse q s nil Syntax/defaultQuerySyntax)
      q)))
-
-(defn data
-  "The value of the Jena `node` as a query returns it, with IRIs under the
-  `prefixes` as keywords, default-prefixes unless given, e.g. for the rows of
-  a ResultSet from Jena's own query API. A nil node, e.g. an unbound
-  variable, is nil."
-  ([node]
-   (data node term/default-prefixes))
-  ([node prefixes]
-   (convert/data node prefixes)))
 
 (defn- variable
   "The Jena Var of the symbol `sym`, e.g. ?s."

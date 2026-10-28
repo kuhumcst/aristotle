@@ -1,4 +1,4 @@
-(ns dk.cst.theophrastus.impl.convert
+(ns dk.cst.theophrastus.convert
   "Jena nodes to Clojure values and back, with the RDF terms of the term
   namespace."
   (:require [dk.cst.theophrastus.term :as term]
@@ -88,22 +88,29 @@
           x)))))
 
 (defn data
-  "The Clojure value of the Jena `node`, with an IRI in one of the
-  namespaces of `prefixes` as a keyword."
-  [^Node node prefixes]
-  (cond
-    (nil? node)          nil
-    (.isURI node)        (iri->data (.getURI node) prefixes)
-    (.isLiteral node)    (literal->data node)
-    (.isBlank node)      (symbol (str "_" (.getBlankNodeLabel node)))
-    (.isVariable node)   (symbol (str "?" (.getName node)))
-    (.isTripleTerm node) (throw (ex-info (str "No triple terms yet: " node)
-                                         {:node node}))
-    :else                (throw (ex-info (str "No Clojure value for " node)
-                                         {:node node}))))
+  "The value of the Jena `node` as a query returns it, with IRIs under the
+  `prefixes` as keywords, default-prefixes unless given, e.g. for the rows of
+  a ResultSet from Jena's own query API. A nil node, e.g. an unbound
+  variable, is nil."
+  ([node]
+   (data node term/default-prefixes))
+  ([^Node node prefixes]
+   (cond
+     (nil? node)          nil
+     (.isURI node)        (iri->data (.getURI node) prefixes)
+     (.isLiteral node)    (literal->data node)
+     (.isBlank node)      (symbol (str "_" (.getBlankNodeLabel node)))
+     (.isVariable node)   (symbol (str "?" (.getName node)))
+     (.isTripleTerm node) (throw (ex-info (str "No triple terms yet: " node)
+                                          {:node node}))
+     :else                (throw (ex-info (str "No Clojure value for " node)
+                                          {:node node})))))
 
 (defprotocol AsNode
-  "A Clojure value that stands for an RDF term."
+  "A Clojure value that stands for an RDF term. A type that stands for an
+  IRI or has a Literal only needs term/Resource or term/AsLiteral, which
+  ClojureScript has too. Extend AsNode for any other term, e.g. Jena's own
+  RDFNode or a type of yours for blank nodes."
   (node [x prefixes]
     "The Jena node of `x`, with a keyword's prefix looked up in `prefixes`."))
 
@@ -158,11 +165,13 @@
         (str x)
         (.getSafeTypeByName (TypeMapper/getInstance) dt))))
 
-  ;; numbers, booleans, java.time values, BigDecimal, Date and anything
-  ;; else with a Literal
+  ;; any other type of term/Resource, or else numbers, booleans, java.time
+  ;; values, BigDecimal, Date and anything else with a Literal
   Object
   (node [x prefixes]
-    (node (term/literal x) prefixes))
+    (if-let [iri (term/iri x prefixes)]
+      (NodeFactory/createURI iri)
+      (node (term/literal x) prefixes)))
 
   nil
   (node [_ _]

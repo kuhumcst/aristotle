@@ -5,7 +5,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [dk.cst.theophrastus :as theo]
-            [dk.cst.theophrastus.impl.convert :as convert]
+            [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.txn :as txn]
             [dk.cst.theophrastus.term :as term])
   (:import [dk.cst.theophrastus Db]
@@ -13,13 +13,12 @@
            [java.io File]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
-           [org.apache.jena.graph Graph GraphMemFactory Node NodeFactory]
+           [org.apache.jena.graph Graph GraphMemFactory Node]
            [org.apache.jena.query Dataset Query QueryCancelledException
             QueryParseException]
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.reasoner ReasonerRegistry]
            [org.apache.jena.riot RDFDataMgr]
-           [org.apache.jena.sparql.core Var]
            [org.apache.jena.tdb2 TDB2Factory]
            [org.apache.jena.tdb2.sys TDBInternal]))
 
@@ -215,16 +214,6 @@
   (is (thrown? QueryParseException
                (theo/query "SELECT * WHERE { ?s ex:p ?o }"))
       "ex isn't one of the default prefixes"))
-
-(deftest data
-  (let [iri (NodeFactory/createURI "http://example.com/a")]
-    (is (= :ex/a (theo/data iri prefixes)))
-    (is (= "<http://example.com/a>" (theo/data iri))
-        "an IRI outside the prefixes stays in angle brackets"))
-  (is (= (term/->LangStr "hund" "da")
-         (theo/data (NodeFactory/createLiteralLang "hund" "da"))))
-  (is (= '?s (theo/data (Var/alloc "s"))) "a variable")
-  (is (nil? (theo/data nil)) "an unbound value"))
 
 (deftest select
   (doseq [db (label-dbs)]

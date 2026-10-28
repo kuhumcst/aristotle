@@ -1,8 +1,8 @@
-(ns dk.cst.theophrastus.impl.convert-test
+(ns dk.cst.theophrastus.convert-test
   "Jena nodes to Clojure values and back, for each kind of term that DanNet
   writes or reads."
   (:require [clojure.test :refer [deftest is]]
-            [dk.cst.theophrastus.impl.convert :as convert]
+            [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.term :as term])
   (:import [clojure.lang ExceptionInfo]
            [java.net URI]
@@ -40,6 +40,12 @@
   [s]
   (convert/data (parse s) prefixes))
 
+;; a type of one's own that stands for an IRI
+(defrecord Iri [s]
+  term/Resource
+  (iri [_ _]
+    s))
+
 (deftest clojure->iri
   (is (= "https://wordnet.dk/dannet/data/synset-1"
          (.getURI (convert/node :dn/synset-1 prefixes))))
@@ -47,6 +53,9 @@
          (.getURI (convert/node "<http://example.com/x>" prefixes))))
   (is (= "http://example.com/x"
          (.getURI (convert/node (URI. "http://example.com/x") prefixes))))
+  (is (= "http://example.com/x"
+         (.getURI (convert/node (->Iri "http://example.com/x") prefixes)))
+      "a type that only extends term/Resource")
   (is (thrown-with-msg? ExceptionInfo #"No namespace"
                         (convert/node :nowhere/x prefixes)))
   (is (thrown-with-msg? ExceptionInfo #"Not an absolute IRI"
@@ -109,7 +118,9 @@
   (is (= "<http://example.com/>" (->data "<http://example.com/>"))
       "a namespace itself, e.g. the object of rdfs:isDefinedBy")
   (is (= "<http://www.w3.org/2002/07/owl#>"
-         (->data "<http://www.w3.org/2002/07/owl#>"))))
+         (->data "<http://www.w3.org/2002/07/owl#>")))
+  (is (= "<http://example.com/x>" (convert/data (parse "<http://example.com/x>")))
+      "the default prefixes unless given, which lack ex"))
 
 (deftest literal->clojure
   (is (= "hund" (->data "\"hund\"")))
@@ -149,6 +160,9 @@
 (deftest blank-node-and-variable->clojure
   (is (= '_b1 (->data "_:b1")))
   (is (= '?x (convert/data (Var/alloc "x") prefixes))))
+
+(deftest unbound-variable->clojure
+  (is (nil? (convert/data nil prefixes))))
 
 (deftest unsupported-terms
   (is (thrown-with-msg? ExceptionInfo #"No base direction"
