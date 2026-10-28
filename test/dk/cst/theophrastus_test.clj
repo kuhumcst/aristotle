@@ -75,7 +75,7 @@
     (theo/transact! db [[:ex/s :ex/p "o"]])
     (is (thrown? ExceptionInfo
                  (theo/transact! db [[:ex/s :ex/p "q"]
-                                   [:ex/s :ex/p (term/->LangStr "x" "en_US")]])))
+                                   [:ex/s :ex/p (term/->LangString "x" "en_US")]])))
     (is (= 1 (graph-size db)) "a failed write is undone")))
 
 (deftest tdb2-prefixes
@@ -113,7 +113,7 @@
     (is (identical? db (theo/transact!
                          db
                          [[:ex/s :ex/p "o"]
-                          [:ex/s :rdfs/label (term/->LangStr "hund" "da")]])))
+                          [:ex/s :rdfs/label (term/->LangString "hund" "da")]])))
     (is (= 2 (.size m)))
     (is (.contains (.getGraph m)
                    (convert/node :ex/s prefixes)
@@ -131,7 +131,7 @@
     (testing "an error in the data leaves the db as it was"
       (is (thrown? ExceptionInfo
                    (theo/transact! db [[:ex/s :ex/p "q"]
-                                     [:ex/s :ex/p (term/->LangStr "x" "en_US")]]
+                                     [:ex/s :ex/p (term/->LangString "x" "en_US")]]
                                  :ex/g)))
       (is (= 2 (graph-size db "http://example.com/g"))))
     (is (thrown-with-msg? ExceptionInfo #"Not a triple"
@@ -202,11 +202,11 @@
 
 (def label-data
   "The triples of the pinned query tests, which DanNet's queries resemble."
-  [[:ex/a :rdfs/label (term/->LangStr "hund" "da")]
+  [[:ex/a :rdfs/label (term/->LangString "hund" "da")]
    [:ex/a :ex/count 2]
    [:ex/a :ex/part '_part]
    ['_part :rdfs/label "del"]
-   [:ex/b :rdfs/label (term/->LangStr "dog" "en")]
+   [:ex/b :rdfs/label (term/->LangString "dog" "en")]
    [:ex/c :rdfs/label "kat"]])
 
 (defn label-dbs
@@ -228,8 +228,8 @@
 
 (deftest select
   (doseq [db (label-dbs)]
-    (is (= #{{'?s :ex/a '?l (term/->LangStr "hund" "da")}
-             {'?s :ex/b '?l (term/->LangStr "dog" "en")}
+    (is (= #{{'?s :ex/a '?l (term/->LangString "hund" "da")}
+             {'?s :ex/b '?l (term/->LangString "dog" "en")}
              {'?s :ex/c '?l "kat"}
              {'?s '_part '?l "del"}}
            (set (theo/q "SELECT * WHERE { ?s rdfs:label ?l }" db))))
@@ -241,14 +241,14 @@
 (deftest bindings
   (doseq [db (label-dbs)
           :let [labels #(theo/q "SELECT * WHERE { ?s rdfs:label ?l }" db %)]]
-    (is (= [{'?s :ex/b '?l (term/->LangStr "dog" "en")}] (labels {'?s :ex/b}))
+    (is (= [{'?s :ex/b '?l (term/->LangString "dog" "en")}] (labels {'?s :ex/b}))
         "one value, kept in the rows")
-    (is (= [{'?s :ex/a '?l (term/->LangStr "hund" "da")}]
-           (labels {'?l (term/->LangStr "hund" "da")})))
+    (is (= [{'?s :ex/a '?l (term/->LangString "hund" "da")}]
+           (labels {'?l (term/->LangString "hund" "da")})))
     (is (= 2 (count (labels {'?s [:ex/a :ex/b]}))) "several values")
-    (is (= [{'?s :ex/b '?l (term/->LangStr "dog" "en")}]
+    (is (= [{'?s :ex/b '?l (term/->LangString "dog" "en")}]
            (labels {'?s [:ex/a :ex/b]
-                    '?l ["kat" (term/->LangStr "dog" "en")]}))
+                    '?l ["kat" (term/->LangString "dog" "en")]}))
         "several variables with several values each")
     (is (= #{:ex/a :ex/c} (set (map '?s (labels {'[?s ?l] [[:ex/a nil]
                                                            [nil "kat"]]}))))
@@ -284,7 +284,7 @@
       (is (instance? Db result))
       (is (= (:prefixes db) (:prefixes result)))
       (is (= #{"kat" "del"
-               (term/->LangStr "hund" "da") (term/->LangStr "dog" "en")}
+               (term/->LangString "hund" "da") (term/->LangString "dog" "en")}
              (set (map '?l (theo/q "SELECT ?l WHERE { ?s ex:name ?l }" result))))
           "a CONSTRUCT returns a db that can be queried"))
     (is (= 4 (.size ^Model (:model (theo/q "DESCRIBE ex:a" db))))
@@ -534,7 +534,7 @@
     (is (thrown? ExceptionInfo
                  (theo/retract! db [['_ :ex/name '_]
                                   [:ex/luke :ex/name
-                                   (term/->LangStr "x" "en_US")]])))
+                                   (term/->LangString "x" "en_US")]])))
     (is (= #{"Luke" "Hannah" "Thom" "Jamie"} (names))
         "an error in one pattern leaves the db as it was")
     (theo/retract! db ['_address :ex/city '_])

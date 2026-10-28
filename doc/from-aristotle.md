@@ -13,7 +13,7 @@ name:
 | Aristotle                                | Theophrastus                          |
 |------------------------------------------|---------------------------------------|
 | `(aa/graph :simple)`                     | `(theo/db)`                           |
-| `(aa/graph :jena-rules rules)`           | `theo/db` of a `rules/->inf-model`    |
+| `(aa/graph :jena-rules rules)`           | `theo/db` of a `rules/inf-model`      |
 | `(aa/graph :jena-mini)`                  | the same, with `rules/mini-rules`     |
 | `aa/add`                                 | `theo/transact!`                      |
 | `aa/read`                                | `theo/read!`                          |
@@ -27,7 +27,7 @@ name:
 | `validation/validate`                    | `shacl/validate`                      |
 
 Aristotle turned on the OWL translation and transitive closure caching of
-its rule reasoner, which `rules/->reasoner` only does when you ask.
+its rule reasoner, which `rules/reasoner` only does when you ask.
 
 Queries
 -------
@@ -46,7 +46,7 @@ Data
 - A query returns an xsd:decimal, date or time as a Literal, rather than as
   a BigDecimal, Date or XSDDateTime. On the JVM, `term/value` turns it into
   a BigDecimal or a java.time value.
-- A string with a language tag is the LangStr of the term namespace, not
+- A string with a language tag is the LangString of the term namespace, not
   the one of ont-app.
 - A java.net.URL is no longer an IRI, since it can change one. Use a
   java.net.URI or a string in angle brackets.

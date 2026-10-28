@@ -45,7 +45,7 @@
 ;; severity
 (defn validate
   "The SHACL report of `db` against the `shapes`, or only of its `node`, as
-  {:conforms? boolean, :n long, :entries [...]} in a read transaction.
+  {:conforms? boolean, :entries [...]} in a read transaction.
 
   Each entry is a map of :focus-node, :path, :value, :shape, :constraint,
   :message and :severity, with values under the prefixes of `db` and sh for
@@ -67,7 +67,6 @@
               entries                  (mapv (fn [e] (entry->map e prefixes))
                                              (.getEntries report))]
           {:conforms? (.conforms report)
-           :n         (count entries)
            :entries   entries})))))
 
 (defn by-severity
@@ -75,8 +74,8 @@
   [entries]
   (group-by :severity entries))
 
-(defn blocking?
-  "Whether the validation `result` has an entry of :sh/Violation, which
-  should block a write, unlike :sh/Warning and :sh/Info."
-  [result]
-  (boolean (some #(= :sh/Violation (:severity %)) (:entries result))))
+(defn violations?
+  "Whether the `report` has an entry of :sh/Violation, rather than only
+  :sh/Warning or :sh/Info."
+  [report]
+  (boolean (some #(= :sh/Violation (:severity %)) (:entries report))))

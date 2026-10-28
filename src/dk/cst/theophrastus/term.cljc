@@ -3,7 +3,7 @@
 
   An IRI is a keyword when its prefix is known, e.g. :rdfs/label, and a
   string in angle brackets when it isn't, e.g. \"<https://cst.dk>\". A
-  language-tagged string is a LangStr. A Literal holds any other literal
+  language-tagged string is a LangString. A Literal holds any other literal
   as its lexical form and datatype IRI.
 
   Both types print with a reader tag and read back from it:
@@ -41,44 +41,49 @@
   (and (string? x)
        (some? (re-matches iri-re x))))
 
-(defn blank?
+(defn blank-node?
   "Whether `x` is a blank node, a symbol such as _b1."
   [x]
   (and (symbol? x)
        (nil? (namespace x))
        (str/starts-with? (name x) "_")))
 
-(defprotocol Resource
+(defprotocol AsIri
   "A value that stands for an IRI. Extend it only to a type that keeps the
   IRI exactly as written. java.net.URL, js/URL and goog.Uri all change
   some IRIs, e.g. by lower-casing the scheme or percent-encoding Æ."
-  (iri [x prefixes]
-    "The IRI that `x` stands for, without angle brackets, or nil when there
-    is none. A keyword's prefix is looked up in `prefixes`, a map in the
-    shape of default-prefixes."))
+  (as-iri [x prefixes]
+    "The IRI that `x` stands for, as iri returns it."))
 
-(extend-protocol Resource
+(defn iri
+  "The IRI that `x` stands for, without angle brackets, or nil when there is
+  none. A keyword's prefix is looked up in `prefixes`, a map in the shape of
+  default-prefixes."
+  [x prefixes]
+  (as-iri x prefixes))
+
+(extend-protocol AsIri
   #?(:clj clojure.lang.Keyword :cljs cljs.core/Keyword)
-  (iri [k prefixes]
+  (as-iri [k prefixes]
     (when-let [ns-iri (some->> (namespace k) keyword (get prefixes))]
       (some-> (iri ns-iri prefixes) (str (name k)))))
 
   #?(:clj String :cljs string)
-  (iri [s _]
+  (as-iri [s _]
     (when (iri-string? s)
       (subs s 1 (dec (count s)))))
 
   #?@(:clj [java.net.URI
-            (iri [uri _]
+            (as-iri [uri _]
               (when (.isAbsolute uri)
                 (str uri)))])
 
   #?(:clj Object :cljs default)
-  (iri [_ _]
+  (as-iri [_ _]
     nil)
 
   nil
-  (iri [_ _]
+  (as-iri [_ _]
     nil))
 
 (defn lower-case-lang
@@ -90,16 +95,16 @@
 
 ;; RDF 1.2 Concepts, section 3.4: the lexical forms are compared
 ;; case-sensitively, the language tags case-insensitively
-(deftype LangStr [s lang]
+(deftype LangString [s lang]
   Object
   (toString [_]
     s)
 
   #?@(:clj  [(equals [_ x]
-               (and (instance? LangStr x)
-                    (= s (.-s ^LangStr x))
+               (and (instance? LangString x)
+                    (= s (.-s ^LangString x))
                     (= (lower-case-lang lang)
-                       (lower-case-lang (.-lang ^LangStr x)))))
+                       (lower-case-lang (.-lang ^LangString x)))))
              (hashCode [_]
                (hash [s (lower-case-lang lang)]))
 
@@ -108,10 +113,10 @@
                (.hashCode this))]
       :cljs [IEquiv
              (-equiv [_ x]
-               (and (instance? LangStr x)
-                    (= s (.-s ^LangStr x))
+               (and (instance? LangString x)
+                    (= s (.-s ^LangString x))
                     (= (lower-case-lang lang)
-                       (lower-case-lang (.-lang ^LangStr x)))))
+                       (lower-case-lang (.-lang ^LangString x)))))
 
              IHash
              (-hash [_]
@@ -123,8 +128,8 @@
                (-pr-writer [s lang] writer opts))]))
 
 (defn lang
-  "The language tag of the LangStr `x`, as written."
-  [^LangStr x]
+  "The language tag of the LangString `x`, as written."
+  [^LangString x]
   (.-lang x))
 
 (deftype Literal [s datatype]
@@ -191,8 +196,8 @@
                      {:datatype dt})))))
 
 #?(:clj
-   (defmethod print-method LangStr
-     [^LangStr x ^java.io.Writer writer]
+   (defmethod print-method LangString
+     [^LangString x ^java.io.Writer writer]
      (.write writer "#rdf/langstring ")
      (print-method [(.-s x) (.-lang x)] writer)))
 
@@ -203,9 +208,9 @@
      (print-method [(.-s x) (.-datatype x)] writer)))
 
 (defn read-langstring
-  "The LangStr of the vector `form`, [s lang], for the tag #rdf/langstring."
+  "The LangString of the vector `form`, [s lang], for the tag #rdf/langstring."
   [[s lang :as form]]
-  (->LangStr s lang))
+  (->LangString s lang))
 
 (defn read-literal
   "The Literal of the vector `form`, [s datatype], for the tag #rdf/literal."

@@ -63,7 +63,7 @@
      (throw (ex-info (str "Not a Model, Dataset or Graph: " x) {:x x}))
 
      :else
-     (let [mapping           (convert/prefix-map prefixes)
+     (let [mapping           (convert/ns-prefix-map prefixes)
            ^PrefixMapping pm (if (instance? Dataset x)
                                (.getPrefixMapping ^Dataset x)
                                x)]
@@ -444,7 +444,7 @@
     (property-map rows)
     (fn [v]
       (let [expand (fn [x]
-                     (if (and (term/blank? x) (not (seen x)))
+                     (if (and (term/blank-node? x) (not (seen x)))
                        (with-meta (describe db
                                             (q properties-query db {'?s x})
                                             (conj seen x))
@@ -504,7 +504,7 @@
             nested  (apply merge (filter map? pattern))
             pull-v  (fn [spec v]
                       (let [id (if (map? v) (:subject (meta v)) v)]
-                        (or (when (or (map? v) (keyword? v) (term/blank? v)
+                        (or (when (or (map? v) (keyword? v) (term/blank-node? v)
                                       (term/iri-string? v))
                               (cond
                                 (vector? spec)

@@ -47,12 +47,12 @@
 (deftest inference
   ;; a symmetric rule run backward calls itself forever unless tabled
   (doseq [mode (keys rules/modes)
-          :let [reasoner (rules/->reasoner (conj (rules/parse rule-text)
-                                                 rules/table-all)
-                                           {:mode mode})
-                db       (theo/db (rules/->inf-model reasoner
-                                                    (model-of schema)
-                                                    (model-of data))
+          :let [reasoner (rules/reasoner (conj (rules/parse rule-text)
+                                               rules/table-all)
+                                         {:mode mode})
+                db       (theo/db (rules/inf-model reasoner
+                                                  (model-of schema)
+                                                  (model-of data))
                                  {:prefixes prefixes})
                 rex      (theo/entity db :ex/rex)]]
     (is (= {:ex/knows :ex/a} (theo/entity db :ex/b)) (str mode))
@@ -60,16 +60,16 @@
         (str mode ", with the schema"))
     (is (= {:rdf/type :ex/Animal} (:inferred (meta rex))) (str mode)))
   (is (thrown-with-msg? ExceptionInfo #"Not a mode"
-                        (rules/->reasoner [] {:mode :sideways}))))
+                        (rules/reasoner [] {:mode :sideways}))))
 
 (deftest dannet-setup
   (let [ds       (TDB2Factory/createDataset)
         _        (theo/transact! (theo/db ds {:prefixes prefixes}) data :ex/g)
-        reasoner (rules/->reasoner (rules/parse rule-text)
-                                   {:transitive-closure-caching? true})
-        db       (theo/db (rules/->inf-model reasoner
-                                            (model-of schema)
-                                            (.getUnionModel ds))
+        reasoner (rules/reasoner (rules/parse rule-text)
+                                 {:transitive-closure-caching? true})
+        db       (theo/db (rules/inf-model reasoner
+                                          (model-of schema)
+                                          (.getUnionModel ds))
                          {:prefixes prefixes})]
     (is (= {:ex/knows :ex/a} (:inferred (meta (theo/entity db :ex/b))))
         "an inference Model on the union of a TDB2 dataset, as in DanNet")))

@@ -26,7 +26,7 @@
    :forward-rete GenericRuleReasoner/FORWARD_RETE
    :backward     GenericRuleReasoner/BACKWARD})
 
-(defn ->reasoner
+(defn reasoner
   "The GenericRuleReasoner of the `rules`, with these `opts`:
 
   - :mode, one of the keys of modes, :hybrid unless given;
@@ -34,7 +34,7 @@
     rdfs:subClassOf and rdfs:subPropertyOf, false unless given;
   - :owl-translation?, for the OWL rules, false unless given."
   ([rules]
-   (->reasoner rules nil))
+   (reasoner rules nil))
   ([rules {:keys [mode transitive-closure-caching? owl-translation?]
            :or   {mode :hybrid}
            :as   opts}]
@@ -44,7 +44,7 @@
      (.setTransitiveClosureCaching (boolean transitive-closure-caching?))
      (.setOWLTranslation (boolean owl-translation?)))))
 
-(defn ->inf-model
+(defn inf-model
   "The inference Model of the `reasoner` over the `data`, a Model, with the
   `schema` Model when given."
   (^InfModel [^Reasoner reasoner ^Model data]

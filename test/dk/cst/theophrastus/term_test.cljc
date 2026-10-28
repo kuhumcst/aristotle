@@ -32,12 +32,12 @@
   (is (not (term/iri-string? "https://cst.dk")))
   (is (not (term/iri-string? :rdfs/label))))
 
-(deftest blank?
-  (is (term/blank? '_b1))
-  (is (term/blank? '_))
-  (is (not (term/blank? '?x)))
-  (is (not (term/blank? 'a/_b1)))
-  (is (not (term/blank? "_b1"))))
+(deftest blank-node?
+  (is (term/blank-node? '_b1))
+  (is (term/blank-node? '_))
+  (is (not (term/blank-node? '?x)))
+  (is (not (term/blank-node? 'a/_b1)))
+  (is (not (term/blank-node? "_b1"))))
 
 (deftest iri
   (let [prefixes (assoc term/default-prefixes :dn "<https://wordnet.dk/dannet/data/>")]
@@ -63,25 +63,25 @@
     (is (nil? (term/iri nil prefixes)))))
 
 (deftest langstring
-  (let [x (term/->LangStr "hund" "da")]
+  (let [x (term/->LangString "hund" "da")]
     (is (= "hund" (str x)))
     (is (= "da" (term/lang x)))
-    (is (= x (term/->LangStr "hund" "da")))
-    (is (= (hash x) (hash (term/->LangStr "hund" "da"))))
-    (is (= 1 (count (set [x (term/->LangStr "hund" "da")]))))
-    (is (not= x (term/->LangStr "hund" "nb")))
-    (is (not= x (term/->LangStr "Hund" "da"))
+    (is (= x (term/->LangString "hund" "da")))
+    (is (= (hash x) (hash (term/->LangString "hund" "da"))))
+    (is (= 1 (count (set [x (term/->LangString "hund" "da")]))))
+    (is (not= x (term/->LangString "hund" "nb")))
+    (is (not= x (term/->LangString "Hund" "da"))
         "the lexical form is case-sensitive")
     (is (not= x "hund"))
     (is (nil? (term/iri x term/default-prefixes)))
     (is (= "#rdf/langstring [\"hund\" \"da\"]" (pr-str x)))
     (is (= x (edn/read-string {:readers readers} (pr-str x))))
-    (let [quoted (term/->LangStr "\"hund\"\n" "da")]
+    (let [quoted (term/->LangString "\"hund\"\n" "da")]
       (is (= quoted (edn/read-string {:readers readers} (pr-str quoted)))))))
 
 (deftest langstring-case
-  (let [x (term/->LangStr "colour" "en-gb")
-        y (term/->LangStr "colour" "en-GB")]
+  (let [x (term/->LangString "colour" "en-gb")
+        y (term/->LangString "colour" "en-GB")]
     (is (= x y) "the language tag is case-insensitive, as in RDF 1.2")
     (is (= (hash x) (hash y)))
     (is (= 1 (count (set [x y]))))
@@ -91,7 +91,7 @@
      (let [default (java.util.Locale/getDefault)]
        (try
          (java.util.Locale/setDefault (java.util.Locale/forLanguageTag "tr"))
-         (is (= (term/->LangStr "ciao" "IT") (term/->LangStr "ciao" "it"))
+         (is (= (term/->LangString "ciao" "IT") (term/->LangString "ciao" "it"))
              "a Turkish default locale doesn't turn IT into ıt")
          (finally
            (java.util.Locale/setDefault default))))))
@@ -115,7 +115,7 @@
 
 #?(:clj
    (deftest reader-tags
-     (is (= (term/->LangStr "hund" "da")
+     (is (= (term/->LangString "hund" "da")
             (read-string "#rdf/langstring [\"hund\" \"da\"]")))
      (is (= (term/literal "1.50" :xsd/decimal)
             (read-string (str "#rdf/literal [\"1.50\" \"<" xsd "decimal>\"]"))))))

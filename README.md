@@ -100,20 +100,20 @@ A literal is a Clojure value when a type holds it exactly:
 - a string for an xsd:string;
 - a boolean or a number for xsd:boolean, xsd:double, xsd:float, and
   xsd:integer with the types derived from it;
-- a LangStr for a string with a language tag;
+- a LangString for a string with a language tag;
 - a Literal for any other literal, with its lexical form and datatype IRI.
 
-LangStr and Literal print with a tag and read back from it:
+LangString and Literal print with a tag and read back from it:
 
 ```clojure
-(term/->LangStr "hund" "da")
+(term/->LangString "hund" "da")
 ;; => #rdf/langstring ["hund" "da"]
 
 (term/literal "1.50" :xsd/decimal)
 ;; => #rdf/literal ["1.50" "<http://www.w3.org/2001/XMLSchema#decimal>"]
 ```
 
-Two LangStrs are equal when their tags only differ in case, as in RDF 1.2.
+Two LangStrings are equal when their tags only differ in case, as in RDF 1.2.
 To read the tags as EDN, pass `term/read-langstring` and `term/read-literal`
 as the readers.
 
@@ -131,10 +131,12 @@ To write such a value, pass it as it is, or turn it into a Literal with
 ;; => #rdf/literal ["2024-01-02" "<http://www.w3.org/2001/XMLSchema#date>"]
 ```
 
-To write values of a type of your own, extend `term/Resource` when the type
+To write values of a type of your own, extend `term/AsIri` when the type
 stands for an IRI, or `term/AsLiteral` when it has a literal. Both also work
 in ClojureScript. For any other RDF term, extend `convert/AsNode`, which
-turns a value into a Jena node.
+turns a value into a Jena node. Each protocol has a method that you extend,
+e.g. `as-iri`, and a function that you call, e.g. `term/iri`, as with
+`as-file` and `file` in clojure.java.io.
 
 Writing
 -------
@@ -332,12 +334,12 @@ its inference Model:
 (import '[org.apache.jena.rdf.model ModelFactory])
 
 (def reasoner
-  (rules/->reasoner
+  (rules/reasoner
     (rules/parse "@prefix ex: <http://example.com/>.
                   [(?a ex:knows ?b) -> (?b ex:knows ?a)]")))
 
 (def inf-db
-  (theo/db (rules/->inf-model reasoner (ModelFactory/createDefaultModel))
+  (theo/db (rules/inf-model reasoner (ModelFactory/createDefaultModel))
            {:prefixes prefixes}))
 
 (theo/transact! inf-db [[:ex/alice :ex/knows :ex/bob]])

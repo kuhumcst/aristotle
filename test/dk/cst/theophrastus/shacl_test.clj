@@ -49,7 +49,7 @@
                   jim    (first (filter #(= :ex/jim (:focus-node %))
                                         (:entries result)))]]
       (is (false? (:conforms? result)))
-      (is (= 2 (:n result) (count (:entries result))))
+      (is (= 2 (count (:entries result))))
       (is (= {:focus-node :ex/jim
               :path       :ex/name
               :value      nil
@@ -58,13 +58,13 @@
               :severity   :sh/Violation}
              (dissoc jim :message)))
       (is (string? (:message jim)))
-      (is (shacl/blocking? result))
+      (is (shacl/violations? result))
       (is (= #{:sh/Violation :sh/Warning}
              (set (keys (shacl/by-severity (:entries result))))))
       (let [luke (shacl/validate db shapes :ex/luke)]
         (is (= [:sh/Warning] (map :severity (:entries luke)))
             "only the node")
-        (is (not (shacl/blocking? luke)) "a warning doesn't block"))
+        (is (not (shacl/violations? luke)) "a warning isn't a violation"))
       (is (:conforms? (shacl/validate db shapes :ex/nobody))))))
 
 (deftest parse

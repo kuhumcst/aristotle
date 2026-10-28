@@ -42,8 +42,8 @@
 
 ;; a type of one's own that stands for an IRI
 (defrecord Iri [s]
-  term/Resource
-  (iri [_ _]
+  term/AsIri
+  (as-iri [_ _]
     s))
 
 (deftest clojure->iri
@@ -55,7 +55,7 @@
          (.getURI (convert/node (URI. "http://example.com/x") prefixes))))
   (is (= "http://example.com/x"
          (.getURI (convert/node (->Iri "http://example.com/x") prefixes)))
-      "a type that only extends term/Resource")
+      "a type that only extends term/AsIri")
   (is (thrown-with-msg? ExceptionInfo #"No namespace"
                         (convert/node :nowhere/x prefixes)))
   (is (thrown-with-msg? ExceptionInfo #"Not an absolute IRI"
@@ -92,13 +92,13 @@
 
 (deftest clojure->langstring
   (is (= ["hund" (str "http://www.w3.org/1999/02/22-rdf-syntax-ns#" "langString") "da"]
-         (literal (convert/node (term/->LangStr "hund" "da") prefixes))))
+         (literal (convert/node (term/->LangString "hund" "da") prefixes))))
   (is (= "en-GB"
-         (last (literal (convert/node (term/->LangStr "colour" "en-gb") prefixes))))
+         (last (literal (convert/node (term/->LangString "colour" "en-gb") prefixes))))
       "Jena writes language tags in canonical case")
   (doseq [tag ["en_US" "" "da-"]]
     (is (thrown-with-msg? ExceptionInfo #"Not a well-formed language tag"
-                          (convert/node (term/->LangStr "x" tag) prefixes))
+                          (convert/node (term/->LangString "x" tag) prefixes))
         (str "Jena would store " (pr-str tag) " as it is"))))
 
 (deftest clojure->blank-node-and-variable
@@ -153,7 +153,7 @@
          (->data "\"x\"^^<http://example.com/datatype>"))))
 
 (deftest langstring->clojure
-  (is (= (term/->LangStr "hund" "da") (->data "\"hund\"@da")))
+  (is (= (term/->LangString "hund" "da") (->data "\"hund\"@da")))
   (is (= "en-GB" (term/lang (->data "\"colour\"@en-gb")))
       "Jena reads language tags in canonical case"))
 

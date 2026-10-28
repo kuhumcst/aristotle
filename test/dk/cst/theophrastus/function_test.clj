@@ -16,10 +16,10 @@
 (function/register! :fn/twice #(* 2 %) prefixes)
 (function/register! :fn/local-name #(when (keyword? %) (name %)) prefixes)
 (function/register! :fn/resource #(keyword "ex" %) prefixes)
-(function/register! :fn/lang #(when (instance? dk.cst.theophrastus.term.LangStr %)
+(function/register! :fn/lang #(when (instance? dk.cst.theophrastus.term.LangString %)
                                 (term/lang %))
                     prefixes)
-(function/register! :fn/blank term/blank? prefixes)
+(function/register! :fn/blank term/blank-node? prefixes)
 (function/register! "<http://example.com/function/fail>"
                     (fn [_] (throw (ex-info "fail" {})))
                     prefixes)
@@ -29,7 +29,7 @@
   (theo/transact! (theo/db (ModelFactory/createDefaultModel) {:prefixes prefixes})
                  [[:ex/a :ex/n 3]
                   [:ex/b :ex/n 7]
-                  [:ex/a :rdfs/label (term/->LangStr "hund" "da")]
+                  [:ex/a :rdfs/label (term/->LangString "hund" "da")]
                   [:ex/a :ex/part '_part]]))
 
 (deftest calls
@@ -47,7 +47,7 @@
          (theo/q "SELECT ?y WHERE { ex:a rdfs:label ?l
                                   BIND (fn:lang(?l) AS ?y) }"
                 db))
-      "a language-tagged string comes in as a LangStr")
+      "a language-tagged string comes in as a LangString")
   (is (= [{'?y true}]
          (theo/q "SELECT ?y WHERE { ex:a ex:part ?p BIND (fn:blank(?p) AS ?y) }"
                 db))

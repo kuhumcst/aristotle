@@ -4,7 +4,7 @@
   (:require [dk.cst.theophrastus.term :as term]
             [clojure.string :as str]
             [dk.simongray.langtag :as langtag])
-  (:import [dk.cst.theophrastus.term LangStr Literal]
+  (:import [dk.cst.theophrastus.term LangString Literal]
            [clojure.lang Keyword Symbol]
            [java.net URI]
            [java.util Map]
@@ -31,7 +31,8 @@
            (sort-by (comp - count second))
            (vec)))))
 
-(defn prefix-map
+;; named after PrefixMapping's getNsPrefixMap, which returns this map
+(defn ns-prefix-map
   "The `prefixes` as Jena takes them: each prefix as a string, mapped to its
   namespace IRI without angle brackets."
   [prefixes]
@@ -46,7 +47,7 @@
   "The Jena PrefixMapping of the `prefixes`."
   ^PrefixMapping [prefixes]
   (doto (PrefixMapping$Factory/create)
-    (.setNsPrefixes ^Map (prefix-map prefixes))))
+    (.setNsPrefixes ^Map (ns-prefix-map prefixes))))
 
 (defn iri->data
   "The IRI `s` as a keyword, when the longest namespace of `prefixes` that
@@ -62,7 +63,7 @@
       (str "<" s ">")))
 
 (defn literal->data
-  "The Clojure value of the literal `node`: a string, a LangStr, the value
+  "The Clojure value of the literal `node`: a string, a LangString, the value
   of a native datatype, or else a Literal."
   [^Node node]
   (let [lex  (.getLiteralLexicalForm node)
@@ -74,7 +75,7 @@
                       {:node node}))
 
       (not (str/blank? lang))
-      (term/->LangStr lex lang)
+      (term/->LangString lex lang)
 
       ;; text that passes the IRI rule would become an IRI when written
       (and (= dt (.getURI XSDDatatype/XSDstring))
@@ -108,38 +109,43 @@
 
 (defprotocol AsNode
   "A Clojure value that stands for an RDF term. A type that stands for an
-  IRI or has a Literal only needs term/Resource or term/AsLiteral, which
+  IRI or has a Literal only needs term/AsIri or term/AsLiteral, which
   ClojureScript has too. Extend AsNode for any other term, e.g. Jena's own
   RDFNode or a type of yours for blank nodes."
-  (node [x prefixes]
-    "The Jena node of `x`, with a keyword's prefix looked up in `prefixes`."))
+  (as-node [x prefixes]
+    "The Jena node of `x`, as node returns it."))
+
+(defn node
+  "The Jena node of `x`, with a keyword's prefix looked up in `prefixes`."
+  ^Node [x prefixes]
+  (as-node x prefixes))
 
 (extend-protocol AsNode
   Node
-  (node [n _]
+  (as-node [n _]
     n)
 
   Keyword
-  (node [k prefixes]
+  (as-node [k prefixes]
     (if-let [iri (term/iri k prefixes)]
       (NodeFactory/createURI iri)
       (throw (ex-info (str "No namespace for the prefix of " k)
                       {:keyword k}))))
 
   String
-  (node [s prefixes]
+  (as-node [s prefixes]
     (if-let [iri (term/iri s prefixes)]
       (NodeFactory/createURI iri)
       (NodeFactory/createLiteralString s)))
 
   URI
-  (node [uri prefixes]
+  (as-node [uri prefixes]
     (if-let [iri (term/iri uri prefixes)]
       (NodeFactory/createURI iri)
       (throw (ex-info (str "Not an absolute IRI: " uri) {:uri uri}))))
 
   Symbol
-  (node [sym _]
+  (as-node [sym _]
     (let [s (name sym)]
       (or (when-not (namespace sym)
             (cond
@@ -150,8 +156,8 @@
                           {:symbol sym})))))
 
   ;; RDF 1.2 Concepts, section 3.4: a language tag is well-formed by BCP 47
-  LangStr
-  (node [x _]
+  LangString
+  (as-node [x _]
     (let [lang (term/lang x)]
       (if (langtag/well-formed? lang)
         (NodeFactory/createLiteralLang (str x) lang)
@@ -159,20 +165,20 @@
                         {:lang lang})))))
 
   Literal
-  (node [x prefixes]
+  (as-node [x prefixes]
     (let [dt (term/iri (term/datatype x) prefixes)]
       (NodeFactory/createLiteralDT
         (str x)
         (.getSafeTypeByName (TypeMapper/getInstance) dt))))
 
-  ;; any other type of term/Resource, or else numbers, booleans, java.time
+  ;; any other type of term/AsIri, or else numbers, booleans, java.time
   ;; values, BigDecimal, Date and anything else with a Literal
   Object
-  (node [x prefixes]
+  (as-node [x prefixes]
     (if-let [iri (term/iri x prefixes)]
       (NodeFactory/createURI iri)
-      (node (term/literal x) prefixes)))
+      (as-node (term/literal x) prefixes)))
 
   nil
-  (node [_ _]
+  (as-node [_ _]
     (throw (ex-info "No RDF term for nil" {}))))
