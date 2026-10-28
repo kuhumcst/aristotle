@@ -118,26 +118,54 @@
     (is (.contains (.getGraph m)
                    (convert/node :ex/s prefixes)
                    (convert/node :ex/p prefixes)
-                   (convert/node "o" prefixes)))
-    (is (thrown-with-msg? ExceptionInfo #"no named graphs"
-                          (theo/transact! db [[:ex/s :ex/p "o"]] :ex/g)))))
+                   (convert/node "o" prefixes)))))
 
 (deftest transact-dataset
-  (let [db (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})]
+  (let [db (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})
+        g  (theo/named-graph db :ex/g)]
     (theo/transact! db [[:ex/s :ex/p "o"]])
-    (theo/transact! db [[:ex/s :ex/p "o"] [:ex/s :ex/p "p"]] :ex/g)
+    (theo/transact! g [[:ex/s :ex/p "o"] [:ex/s :ex/p "p"]])
     (is (= 1 (graph-size db)))
     (is (= 2 (graph-size db "http://example.com/g")))
     (testing "an error in the data leaves the db as it was"
       (is (thrown? ExceptionInfo
-                   (theo/transact! db [[:ex/s :ex/p "q"]
-                                     [:ex/s :ex/p (term/->LangString "x" "en_US")]]
-                                 :ex/g)))
+                   (theo/transact! g [[:ex/s :ex/p "q"]
+                                      [:ex/s :ex/p
+                                       (term/->LangString "x" "en_US")]])))
       (is (= 2 (graph-size db "http://example.com/g"))))
     (is (thrown-with-msg? ExceptionInfo #"Not a triple"
-                          (theo/transact! db [[:ex/s :ex/p]])))
-    (is (thrown-with-msg? ExceptionInfo #"Not a graph name"
-                          (theo/transact! db [[:ex/s :ex/p "o"]] "g")))))
+                          (theo/transact! db [[:ex/s :ex/p]])))))
+
+(deftest graph-views
+  (doseq [db [(theo/db (TDB2Factory/createDataset) {:prefixes prefixes})
+              (theo/db {:prefixes prefixes})]
+          :let [g     (theo/named-graph db :ex/g)
+                h     (theo/named-graph db "<http://example.com/h>")
+                union (theo/union-graph db)]]
+    (theo/transact! g [[:ex/s :ex/p "o"]])
+    (theo/transact! (theo/default-graph db) [[:ex/s :ex/p "d"]])
+    (is (= 1 (graph-size db "http://example.com/g"))
+        "the first write adds the graph")
+    (is (= 1 (graph-size db)) "the default graph")
+    (is (= {:ex/p "o"} (theo/entity union :ex/s))
+        "the union of the named graphs, without the default graph")
+    (is (= prefixes (:prefixes g) (:prefixes union))
+        "a view keeps the prefixes")
+    (is (thrown? Exception (theo/transact! union [[:ex/s :ex/p "x"]]))
+        "the union can only be read")
+    (txn/with-write-transaction (:dataset db)
+      (theo/transact! g [[:ex/t :ex/p "o"]])
+      (theo/transact! h [[:ex/t :ex/p "p"]]))
+    (is (= 2 (count (theo/q union "SELECT * WHERE { ex:t ?p ?o }")))
+        "views share the transactions of the Dataset"))
+  (let [db (theo/db (ModelFactory/createDefaultModel) {:prefixes prefixes})]
+    (is (identical? db (theo/default-graph db)))
+    (is (thrown-with-msg? ExceptionInfo #"no named graphs"
+                          (theo/named-graph db :ex/g)))
+    (is (thrown-with-msg? ExceptionInfo #"no named graphs"
+                          (theo/union-graph db))))
+  (is (thrown-with-msg? ExceptionInfo #"Not a graph name"
+                        (theo/named-graph (theo/db) "g"))))
 
 (deftest graph-and-dataset-graph
   (let [g  (GraphMemFactory/createDefaultGraph)
@@ -152,7 +180,7 @@
         "a graph of a TDB2 dataset, in a transaction of the dataset"))
   (let [ds (TDB2Factory/createDataset)
         db (theo/db (.asDatasetGraph ds) {:prefixes prefixes})]
-    (theo/transact! db [[:ex/s :ex/p "o"]] :ex/g)
+    (theo/transact! (theo/named-graph db :ex/g) [[:ex/s :ex/p "o"]])
     (is (= 1 (graph-size db "http://example.com/g"))
         "a DatasetGraph, through a Dataset of it")))
 
@@ -170,23 +198,24 @@
 
 (deftest read-files
   (let [db  (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})
+        in  #(theo/named-graph db %)
         n3  (.size (RDFDataMgr/loadGraph "test/TheFirm.n3"))]
-    (theo/read! db (io/file "test/foaf.rdf") :ex/foaf)
-    (theo/read! db "test/TheFirm.n3" :ex/firm)
-    (theo/read! db (io/resource "TheFirm.n3") :ex/firm-resource)
+    (theo/read! (in :ex/foaf) (io/file "test/foaf.rdf"))
+    (theo/read! (in :ex/firm) "test/TheFirm.n3")
+    (theo/read! (in :ex/firm-resource) (io/resource "TheFirm.n3"))
     (is (pos? (graph-size db "http://example.com/foaf")) "RDF/XML")
     (is (= n3 (graph-size db "http://example.com/firm")) "N3 from a path")
     (is (= n3 (graph-size db "http://example.com/firm-resource"))
         "N3 from a resource, which may be in a jar")
     (is (zero? (graph-size db)))
-    (theo/read! db [(io/file "test/foaf.rdf") "test/TheFirm.n3"] :ex/both)
+    (theo/read! (in :ex/both) [(io/file "test/foaf.rdf") "test/TheFirm.n3"])
     (is (= (+ n3 (graph-size db "http://example.com/foaf"))
            (graph-size db "http://example.com/both"))
         "several files")
     (is (thrown? Exception
-                 (theo/read! db ["test/TheFirm.n3"
-                                (temp-file ".ttl" "<http://example.com/s> .")]
-                            :ex/half)))
+                 (theo/read! (in :ex/half)
+                             ["test/TheFirm.n3"
+                              (temp-file ".ttl" "<http://example.com/s> .")])))
     (is (zero? (graph-size db "http://example.com/half"))
         "a syntax error in one file adds none of them")
     (is (thrown-with-msg? ExceptionInfo #"No RDF syntax"
@@ -197,7 +226,7 @@
       (let [ttl (temp-file ".ttl" (str "<http://example.com/s> "
                                        "<http://example.com/p> \"o\" .\n"
                                        "<http://example.com/s> ."))]
-        (is (thrown? Exception (theo/read! db ttl :ex/broken))))
+        (is (thrown? Exception (theo/read! (in :ex/broken) ttl))))
       (is (zero? (graph-size db "http://example.com/broken"))))))
 
 (def label-data
@@ -362,7 +391,8 @@
                   ^Model %)
         tdb2   (TDB2Factory/createDataset)]
     ;; the union model of TDB2 has the named graphs, not the default one
-    (theo/transact! (theo/db tdb2 {:prefixes prefixes}) data :ex/g)
+    (theo/transact! (theo/named-graph (theo/db tdb2 {:prefixes prefixes}) :ex/g)
+                    data)
     (doseq [model [(rdfs (:model (theo/transact! (mem-db) data)))
                    (rdfs (.getUnionModel tdb2))]
             :let [rex      (theo/entity (theo/db model {:prefixes prefixes})
@@ -466,16 +496,14 @@
     (is (= :rdf/Alt (:rdf/type (theo/rdf-alt [:ex/a]))))))
 
 (deftest write
-  (doseq [[db graph] [[(first (people-dbs)) nil]
-                      [(theo/transact! (theo/db (TDB2Factory/createDataset)
-                                             {:prefixes prefixes})
-                                     people
-                                     :ex/g)
-                       :ex/g]]
+  (doseq [db [(first (people-dbs))
+              (-> (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})
+                  (theo/named-graph :ex/g)
+                  (theo/transact! people))]
           :let [f    (temp-file ".ttl" "")
                 copy (theo/db (ModelFactory/createDefaultModel)
                              {:prefixes prefixes})]]
-    (is (identical? db (theo/write db f graph)))
+    (is (identical? db (theo/write db f)))
     (is (str/includes? (slurp f) "PREFIX ex:") "with the prefixes of the db")
     (theo/read! copy f)
     (is (= (count people) (graph-size copy)))
@@ -544,10 +572,9 @@
         "a blank node from the data as a pattern")
     (is (thrown-with-msg? ExceptionInfo #"Not a pattern"
                           (theo/retract! db [[:ex/luke :ex/name]]))))
-  (let [db (theo/transact! (theo/db (TDB2Factory/createDataset)
-                                 {:prefixes prefixes})
-                         people :ex/g)]
-    (theo/retract! db ['_ :ex/name '_] :ex/g)
+  (let [db (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})
+        g  (theo/transact! (theo/named-graph db :ex/g) people)]
+    (theo/retract! g ['_ :ex/name '_])
     (is (empty? (theo/q db "SELECT * WHERE { GRAPH ex:g { ?s ex:name ?n } }"))
         "in a named graph")))
 

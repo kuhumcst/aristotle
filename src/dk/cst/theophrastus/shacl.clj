@@ -18,11 +18,11 @@
   (let [^Graph g (cond
                    (instance? Graph x) x
                    (instance? Model x) (.getGraph ^Model x)
-                   (map? x)            (theo/jena-graph x nil)
+                   (map? x)            (theo/jena-graph x)
                    :else               (-> (ModelFactory/createDefaultModel)
                                            (theo/db)
                                            (theo/read! x)
-                                           (theo/jena-graph nil)))]
+                                           (theo/jena-graph)))]
     (Shapes/parse g)))
 
 (defn- entry->map
@@ -57,7 +57,7 @@
    (let [prefixes (assoc prefixes :sh "<http://www.w3.org/ns/shacl#>")]
      (txn/calculate-read
        (or dataset model)
-       #(let [^Graph g                 (theo/jena-graph db nil)
+       #(let [^Graph g                 (theo/jena-graph db)
               ^ValidationReport report (if (some? node)
                                          (.validate (ShaclValidator/get) shapes
                                                     g ^Node (convert/node

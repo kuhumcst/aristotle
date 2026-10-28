@@ -159,8 +159,7 @@ it has none:
 - a predicate such as `:ex/_knows` links the other way.
 
 The function converts all the data before it writes, so an error leaves
-the db as it was. To write to a named graph of a Dataset, pass its IRI
-after the data. A Jena Graph or Model works as data too.
+the db as it was. A Jena Graph or Model works as data too.
 
 Remove triples with `theo/retract!`, where `_` in a pattern matches
 anything, and run a SPARQL Update with `theo/update!`:
@@ -189,6 +188,27 @@ For an RDF list, use `theo/rdf-list` in a map, and for a container
 (theo/transact! db {:rdf/about   :ex/alice
                     :ex/projects (theo/rdf-list [:ex/one :ex/two])})
 ```
+
+Graphs
+------
+
+The functions read and write the default graph of a db of a Dataset, and
+a query can also reach the named graphs with `GRAPH`. For the db of one
+graph, use `theo/named-graph`, `theo/default-graph` or `theo/union-graph`,
+the union of the named graphs:
+
+```clojure
+(def staff (theo/named-graph db :ex/staff))
+
+(theo/transact! staff [[:ex/dave :rdfs/label "Dave"]])
+
+(theo/entity (theo/union-graph db) :ex/dave)
+;; => {:rdfs/label "Dave"}
+```
+
+Each one is a view of the Dataset, and cheap to make. It has the prefixes
+of the db and writes into the Dataset, in its transactions. The union can
+only be read.
 
 Queries
 -------

@@ -76,6 +76,41 @@
          (->Db nil x prefixes)
          (->Db x nil prefixes))))))
 
+;; as in Jena's DatasetGraph: getDefaultGraph, getGraph and getUnionGraph
+(defn default-graph
+  "The db of the default graph of `db`, with its prefixes. The db of a Model
+  has only that graph, so it comes back as it is."
+  [{:keys [dataset prefixes] :as db}]
+  (if dataset
+    (->Db (.getDefaultModel ^Dataset dataset) nil prefixes)
+    db))
+
+(defn named-graph
+  "The db of the named `graph` of `db`, with its prefixes. The graph is an
+  IRI, e.g. a keyword under the prefixes, and the first write to it adds it
+  to the Dataset. Writes to the db go into the Dataset, in its
+  transactions."
+  [{:keys [dataset prefixes] :as db} graph]
+  (let [iri (term/iri graph prefixes)]
+    (cond
+      (nil? dataset)
+      (throw (ex-info "A Model has no named graphs" {:graph graph}))
+
+      iri
+      (->Db (.getNamedModel ^Dataset dataset ^String iri) nil prefixes)
+
+      :else
+      (throw (ex-info (str "Not a graph name: " (pr-str graph))
+                      {:graph graph})))))
+
+(defn union-graph
+  "The db of the union of the named graphs of `db`, with its prefixes. It
+  can only be read, since Jena refuses to write to it."
+  [{:keys [dataset prefixes] :as db}]
+  (if dataset
+    (->Db (.getUnionModel ^Dataset dataset) nil prefixes)
+    (throw (ex-info "A Model has no named graphs" {}))))
+
 ;; RDF Schema 1.1, section 5.1.5: rdf:_1, rdf:_2 and so on are the
 ;; container membership properties, not reversed ones
 (defn- reverse-property
@@ -134,25 +169,15 @@
                     {:tx-data tx-data}))))
 
 (defn jena-graph
-  "The Jena graph of `db` that `graph` names: its default graph when nil."
-  ^Graph [{:keys [^Model model ^Dataset dataset prefixes] :as db} graph]
-  (cond
-    (nil? graph)
-    (.getGraph (or model (.getDefaultModel dataset)))
-
-    model
-    (throw (ex-info "A Model has no named graphs" {:graph graph}))
-
-    :else
-    (let [^Node n (convert/node graph prefixes)]
-      (if (.isURI n)
-        (.getGraph (.getNamedModel dataset (.getURI n)))
-        (throw (ex-info (str "Not a graph name: " (pr-str graph))
-                        {:graph graph}))))))
+  "The Jena Graph of `db`: the graph of its Model, or the default graph of
+  its Dataset."
+  ^Graph [{:keys [^Model model ^Dataset dataset] :as db}]
+  (.getGraph (or model (.getDefaultModel dataset))))
 
 (defn transact!
-  "Add `tx-data` to the default graph of `db`, or to the named `graph`, in
-  one write transaction, and return `db`.
+  "Add `tx-data` to `db` in one write transaction, and return `db`. A db of
+  a Dataset gets it in its default graph, and a db of named-graph in that
+  graph.
 
   The data is a Jena Graph or Model, or a coll of:
 
@@ -165,98 +190,88 @@
 
   It's all converted first, so an error in it leaves the db as it was. A
   plain in-memory Model has no transactions (see the txn namespace)."
-  ([db tx-data]
-   (transact! db tx-data nil))
-  ([{:keys [model dataset prefixes] :as db} tx-data graph]
-   (let [source (cond
-                  (instance? Graph tx-data) tx-data
-                  (instance? Model tx-data) (.getGraph ^Model tx-data)
-                  :else (->triples tx-data prefixes))]
-     (txn/calculate-write (or dataset model)
-                          #(let [g (jena-graph db graph)]
-                             (if (instance? Graph source)
-                               (GraphUtil/addInto g ^Graph source)
-                               (GraphUtil/add g ^java.util.List source))))
-     db)))
+  [{:keys [model dataset prefixes] :as db} tx-data]
+  (let [source (cond
+                 (instance? Graph tx-data) tx-data
+                 (instance? Model tx-data) (.getGraph ^Model tx-data)
+                 :else (->triples tx-data prefixes))]
+    (txn/calculate-write (or dataset model)
+                         #(let [g (jena-graph db)]
+                            (if (instance? Graph source)
+                              (GraphUtil/addInto g ^Graph source)
+                              (GraphUtil/add g ^java.util.List source))))
+    db))
 
 (defn retract!
-  "Remove the triples that the `patterns` match from the default graph of
-  `db`, or from the named `graph`, in one write transaction, and return
-  `db`. A pattern is an [s p o] triple of Clojure values in which _ matches
-  anything, e.g. [:ex/luke :ex/age '_], and one may stand alone. They're
-  all converted first, so an error in one leaves the db as it was."
-  ([db patterns]
-   (retract! db patterns nil))
-  ([{:keys [model dataset prefixes] :as db} patterns graph]
-   (let [triple? #(and (vector? %) (= 3 (count %)) (not-any? coll? %))
-         nodes   (mapv (fn [pattern]
-                         (if (triple? pattern)
-                           (mapv #(if (= '_ %)
-                                    Node/ANY
-                                    (convert/node % prefixes))
-                                 pattern)
-                           (throw (ex-info (str "Not a pattern: "
-                                                (pr-str pattern))
-                                           {:pattern pattern}))))
-                       (if (triple? patterns) [patterns] patterns))]
-     (txn/calculate-write (or dataset model)
-                          #(let [g (jena-graph db graph)]
-                             (doseq [[s p o] nodes]
-                               (.remove g s p o))))
-     db)))
+  "Remove the triples that the `patterns` match from `db` in one write
+  transaction, and return `db`. A pattern is an [s p o] triple of Clojure
+  values in which _ matches anything, e.g. [:ex/luke :ex/age '_], and one
+  may stand alone. They're all converted first, so an error in one leaves
+  the db as it was."
+  [{:keys [model dataset prefixes] :as db} patterns]
+  (let [triple? #(and (vector? %) (= 3 (count %)) (not-any? coll? %))
+        nodes   (mapv (fn [pattern]
+                        (if (triple? pattern)
+                          (mapv #(if (= '_ %)
+                                   Node/ANY
+                                   (convert/node % prefixes))
+                                pattern)
+                          (throw (ex-info (str "Not a pattern: "
+                                               (pr-str pattern))
+                                          {:pattern pattern}))))
+                      (if (triple? patterns) [patterns] patterns))]
+    (txn/calculate-write (or dataset model)
+                         #(let [g (jena-graph db)]
+                            (doseq [[s p o] nodes]
+                              (.remove g s p o))))
+    db))
 
 (defn read!
-  "Read the RDF file at `source`, or the files of a coll of sources, into the
-  default graph of `db`, or into the named `graph`, and return `db`.
+  "Read the RDF file at `source`, or the files of a coll of sources, into
+  `db`, as transact! adds data, and return `db`.
 
   A source is a File, a URL, a URI or a file path, and its name gives the
   syntax, e.g. Turtle for .ttl. Every file is parsed before anything is
   added, so a syntax error leaves the db as it was."
-  ([db source]
-   (read! db source nil))
-  ([db source graph]
-   (let [g (GraphMemFactory/createDefaultGraph)]
-     (doseq [s (if (sequential? source) source [source])
-             :let [url  (io/as-url (if (string? s) (io/file s) s))
-                   lang (RDFLanguages/filenameToLang (str url))]]
-       (cond
-         (nil? lang)
-         (throw (ex-info (str "No RDF syntax for the name " url)
-                         {:source s}))
+  [db source]
+  (let [g (GraphMemFactory/createDefaultGraph)]
+    (doseq [s (if (sequential? source) source [source])
+            :let [url  (io/as-url (if (string? s) (io/file s) s))
+                  lang (RDFLanguages/filenameToLang (str url))]]
+      (cond
+        (nil? lang)
+        (throw (ex-info (str "No RDF syntax for the name " url)
+                        {:source s}))
 
-         (RDFLanguages/isQuads lang)
-         (throw (ex-info (str "Not a syntax for one graph: " lang)
-                         {:source s})))
-       (with-open [in (io/input-stream url)]
-         (-> (RDFParser/create)
-             (.source in)
-             (.lang lang)
-             (.base (str url))
-             (.parse g))))
-     (transact! db g graph))))
+        (RDFLanguages/isQuads lang)
+        (throw (ex-info (str "Not a syntax for one graph: " lang)
+                        {:source s})))
+      (with-open [in (io/input-stream url)]
+        (-> (RDFParser/create)
+            (.source in)
+            (.lang lang)
+            (.base (str url))
+            (.parse g))))
+    (transact! db g)))
 
 (defn write
-  "Write the default graph of `db`, or the named `graph`, to the file
-  `target`, a File or a path, and return `db`. The file name gives the
-  syntax, e.g. Turtle for .ttl, and the file has the prefixes of `db`."
-  ([db target]
-   (write db target nil))
-  ([{:keys [model dataset] :as db} target graph]
-   (let [f    (io/file target)
-         lang (RDFLanguages/filenameToLang (str f))]
-     (cond
-       (nil? lang)
-       (throw (ex-info (str "No RDF syntax for the name " f) {:target target}))
+  "Write `db` to the file `target`, a File or a path, and return `db`. A db
+  of a Dataset writes its default graph. The file name gives the syntax,
+  e.g. Turtle for .ttl, and the file has the prefixes of `db`."
+  [{:keys [model dataset] :as db} target]
+  (let [f    (io/file target)
+        lang (RDFLanguages/filenameToLang (str f))]
+    (cond
+      (nil? lang)
+      (throw (ex-info (str "No RDF syntax for the name " f) {:target target}))
 
-       (RDFLanguages/isQuads lang)
-       (throw (ex-info (str "Not a syntax for one graph: " lang)
-                       {:target target})))
-     (txn/calculate-read (or dataset model)
-                         #(with-open [out (io/output-stream f)]
-                            (RDFDataMgr/write out
-                                              (jena-graph db graph)
-                                              ^Lang lang)))
-     db)))
+      (RDFLanguages/isQuads lang)
+      (throw (ex-info (str "Not a syntax for one graph: " lang)
+                      {:target target})))
+    (txn/calculate-read (or dataset model)
+                        #(with-open [out (io/output-stream f)]
+                           (RDFDataMgr/write out (jena-graph db) ^Lang lang)))
+    db))
 
 ;; RDF 1.1 Turtle, section 2.8: a collection is rdf:first, rdf:rest and
 ;; rdf:nil, with no rdf:type

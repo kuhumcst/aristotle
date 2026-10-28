@@ -64,7 +64,9 @@
 
 (deftest dannet-setup
   (let [ds       (TDB2Factory/createDataset)
-        _        (theo/transact! (theo/db ds {:prefixes prefixes}) data :ex/g)
+        _        (-> (theo/db ds {:prefixes prefixes})
+                     (theo/named-graph :ex/g)
+                     (theo/transact! data))
         reasoner (rules/reasoner (rules/parse rule-text)
                                  {:transitive-closure-caching? true})
         db       (theo/db (rules/inf-model reasoner
