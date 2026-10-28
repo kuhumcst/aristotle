@@ -10,27 +10,33 @@
            [org.apache.jena.sparql.expr Expr ExprEvalException ExprList
             NodeValue]
            [org.apache.jena.sparql.function Function FunctionEnv
-            FunctionFactory FunctionRegistry]))
+            FunctionFactory FunctionRegistry]
+           [org.apache.jena.sparql.util Context]))
 
 (defn- ->function
-  "The ARQ Function of the Clojure function `f`, with values under
-  `prefixes`."
+  "The ARQ Function of the Clojure function `f`, with values under the
+  prefixes of the db that the query runs on, or else under `prefixes`."
   ^Function [f prefixes]
   (reify Function
     (build [_ _uri _args _context])
     (exec [_ binding args _uri env]
-      (let [value #(-> ^Expr %
-                       (.eval ^Binding binding ^FunctionEnv env)
-                       (.asNode)
-                       (convert/data prefixes))
-            r     (apply f (map value (.getList ^ExprList args)))]
+      (let [^Context ctx (.getContext ^FunctionEnv env)
+            prefixes     (or (some-> ctx (.get convert/prefixes-symbol))
+                             prefixes)
+            value        #(-> ^Expr %
+                              (.eval ^Binding binding ^FunctionEnv env)
+                              (.asNode)
+                              (convert/data prefixes))
+            r            (apply f (map value (.getList ^ExprList args)))]
         (if (nil? r)
           (throw (ExprEvalException. "No value"))
           (NodeValue/makeNode ^Node (convert/node r prefixes)))))))
 
 (defn factory
   "The ARQ FunctionFactory of the Clojure function `f`, whose arguments and
-  result are values under `prefixes`, default-prefixes unless given.
+  result are values as the query has them: under the prefixes of the db
+  that theophrastus/q runs it on, or else under `prefixes`, default-prefixes
+  unless given.
 
   A nil from `f` leaves the result unbound, as an error in SPARQL does. An
   exception from `f` fails the query."

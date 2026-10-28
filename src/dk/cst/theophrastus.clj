@@ -315,9 +315,9 @@
   "The Jena Query of the SPARQL string `s`, parsed with the `prefixes` set
   beforehand, default-prefixes unless given, so that `s` needs no PREFIX
   lines for them."
-  ([s]
+  (^Query [s]
    (query s term/default-prefixes))
-  ([s prefixes]
+  (^Query [s prefixes]
    (let [q (doto (Query.)
              (.setPrefixMapping (convert/prefix-mapping prefixes)))]
      (QueryFactory/parse q s nil Syntax/defaultQuerySyntax)
@@ -390,7 +390,8 @@
         exec         (if dataset
                        (QueryExec/dataset (.asDatasetGraph dataset))
                        (QueryExec/graph (.getGraph model)))]
-    [bound (cond-> ^QueryExecBuilder (.query exec bound)
+    [bound (cond-> (-> ^QueryExecBuilder (.query exec bound)
+                       (.set convert/prefixes-symbol ^Object prefixes))
              timeout (.timeout (long timeout) TimeUnit/MILLISECONDS))]))
 
 (defn- graph->db

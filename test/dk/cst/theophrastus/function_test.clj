@@ -2,10 +2,13 @@
   "SPARQL functions written in Clojure, called from queries."
   (:require [clojure.test :refer [deftest is]]
             [dk.cst.theophrastus :as theo]
+            [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.function :as function]
             [dk.cst.theophrastus.term :as term])
   (:import [clojure.lang ExceptionInfo]
-           [org.apache.jena.rdf.model ModelFactory]))
+           [org.apache.jena.rdf.model Model ModelFactory]
+           [org.apache.jena.sparql.core Var]
+           [org.apache.jena.sparql.exec QueryExec]))
 
 (def prefixes
   "The default prefixes, one for the examples and one for the functions."
@@ -23,6 +26,9 @@
 (function/register! "<http://example.com/function/fail>"
                     (fn [_] (throw (ex-info "fail" {})))
                     prefixes)
+;; registered under the default prefixes, which lack ex
+(function/register! "<http://example.com/function/kind>"
+                    #(if (keyword? %) "keyword" "other"))
 
 (def db
   "A db with a few numbers and labels."
@@ -62,3 +68,18 @@
       "an exception fails the query")
   (is (thrown-with-msg? ExceptionInfo #"Not an IRI"
                         (function/register! :nowhere/f identity))))
+
+(deftest prefixes-of-the-query
+  (let [kind "SELECT ?y WHERE { BIND (fn:kind(ex:a) AS ?y) }"]
+    (is (= [{'?y "keyword"}] (theo/q db kind))
+        "an IRI under the prefixes of the db rather than of the registration")
+    (is (= [{'?y "keyword"}] (into [] (theo/reducible db kind)))
+        "the same in a reducible")
+    (is (= "other"
+           (with-open [^QueryExec qe (-> (QueryExec/graph
+                                           (.getGraph ^Model (:model db)))
+                                         (.query (theo/query kind prefixes))
+                                         (.build))]
+             (convert/data (.get (.next (.select qe)) (Var/alloc "y"))
+                           prefixes)))
+        "Jena's own API, without a db, falls back on the registration")))

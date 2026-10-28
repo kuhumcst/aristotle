@@ -395,8 +395,8 @@ symmetric rule such as this one doesn't loop. Jena's own OWL rules are
 `rules/owl-rules` and `rules/mini-rules`.
 
 Register a Clojure function for SPARQL with `function/register!`. It
-takes and returns the same values as a query, and a nil from it leaves the
-result unbound:
+takes and returns the same values as the query that calls it, under the
+prefixes of its db, and a nil from it leaves the result unbound:
 
 ```clojure
 (require '[dk.cst.theophrastus.function :as function]
@@ -409,7 +409,8 @@ result unbound:
 ```
 
 Jena has one registry of functions for the whole JVM, so every query can
-call the function.
+call the function. The prefixes passed to `function/register!` resolve its
+name, and they convert its values for a query run with Jena's own API.
 
 Validate a db against SHACL shapes with `shacl/validate`. The report is
 data, with the same values as a query and the sh prefix for SHACL's terms:

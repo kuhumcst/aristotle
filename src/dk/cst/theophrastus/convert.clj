@@ -49,6 +49,11 @@
   (doto (PrefixMapping$Factory/create)
     (.setNsPrefixes ^Map (ns-prefix-map prefixes))))
 
+(def ^org.apache.jena.sparql.util.Symbol prefixes-symbol
+  "The key under which the context of a query holds the prefixes of its db,
+  so that a SPARQL function can convert values as the query does."
+  (org.apache.jena.sparql.util.Symbol/create "dk.cst.theophrastus/prefixes"))
+
 (defn iri->data
   "The IRI `s` as a keyword, when the longest namespace of `prefixes` that
   it starts with leaves a name, without a slash, or else in angle brackets.
