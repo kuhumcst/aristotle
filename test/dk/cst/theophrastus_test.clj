@@ -232,15 +232,15 @@
              {'?s :ex/b '?l (term/->LangString "dog" "en")}
              {'?s :ex/c '?l "kat"}
              {'?s '_part '?l "del"}}
-           (set (theo/q "SELECT * WHERE { ?s rdfs:label ?l }" db))))
-    (is (= [{'?s :ex/a}] (theo/q (theo/query "SELECT ?s WHERE { ?s ex:count 2 }"
-                                           prefixes)
-                                db))
+           (set (theo/q db "SELECT * WHERE { ?s rdfs:label ?l }"))))
+    (is (= [{'?s :ex/a}]
+           (theo/q db (theo/query "SELECT ?s WHERE { ?s ex:count 2 }"
+                                  prefixes)))
         "a Query, and an integer in SPARQL matching a Clojure integer")))
 
 (deftest bindings
   (doseq [db (label-dbs)
-          :let [labels #(theo/q "SELECT * WHERE { ?s rdfs:label ?l }" db %)]]
+          :let [labels #(theo/q db "SELECT * WHERE { ?s rdfs:label ?l }" %)]]
     (is (= [{'?s :ex/b '?l (term/->LangString "dog" "en")}] (labels {'?s :ex/b}))
         "one value, kept in the rows")
     (is (= [{'?s :ex/a '?l (term/->LangString "hund" "da")}]
@@ -254,15 +254,15 @@
                                                            [nil "kat"]]}))))
         "rows of values, with nil for unbound")
     (is (= [{'?l "kat"}]
-           (theo/q "SELECT ?l WHERE { ?s rdfs:label ?l }" db {'?s :ex/c}))
+           (theo/q db "SELECT ?l WHERE { ?s rdfs:label ?l }" {'?s :ex/c}))
         "the SELECT decides which variables come back")
     (is (= [{'?n 2}]
-           (theo/q "SELECT (COUNT(*) AS ?n) WHERE { ?s rdfs:label ?l }"
-                  db {'?s [:ex/a :ex/c]}))
+           (theo/q db "SELECT (COUNT(*) AS ?n) WHERE { ?s rdfs:label ?l }"
+                   {'?s [:ex/a :ex/c]}))
         "the values limit what the count counts")
-    (let [b (get (first (theo/q "SELECT ?b WHERE { ex:a ex:part ?b }" db)) '?b)]
+    (let [b (get (first (theo/q db "SELECT ?b WHERE { ex:a ex:part ?b }")) '?b)]
       (is (= [{'?b b '?l "del"}]
-             (theo/q "SELECT * WHERE { ?b rdfs:label ?l }" db {'?b b}))
+             (theo/q db "SELECT * WHERE { ?b rdfs:label ?l }" {'?b b}))
           "a blank node from one result finds its triples in the next"))
     (is (thrown-with-msg? ExceptionInfo #"Not a variable"
                           (labels {'s :ex/a})))))
@@ -271,33 +271,35 @@
   (let [db   (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})
         evil "x\" } ; DROP ALL ; SELECT * { ?s ?p \""]
     (theo/transact! db [[:ex/s :ex/p evil]])
-    (is (= [{'?s :ex/s}] (theo/q "SELECT ?s WHERE { ?s ex:p ?o }" db {'?o evil}))
+    (is (= [{'?s :ex/s}]
+           (theo/q db "SELECT ?s WHERE { ?s ex:p ?o }" {'?o evil}))
         "a value goes in as a node, never as SPARQL text")))
 
 (deftest ask-construct-describe
   (doseq [db (label-dbs)]
-    (is (true? (theo/q "ASK { ex:a ex:count 2 }" db)))
-    (is (false? (theo/q "ASK { ex:a ex:count 3 }" db)))
-    (is (true? (theo/q "ASK { ?s ex:count ?n }" db {'?s :ex/a})))
-    (let [result (theo/q "CONSTRUCT { ?s ex:name ?l } WHERE { ?s rdfs:label ?l }"
-                        db)]
+    (is (true? (theo/q db "ASK { ex:a ex:count 2 }")))
+    (is (false? (theo/q db "ASK { ex:a ex:count 3 }")))
+    (is (true? (theo/q db "ASK { ?s ex:count ?n }" {'?s :ex/a})))
+    (let [result (theo/q db
+                         "CONSTRUCT { ?s ex:name ?l } WHERE { ?s rdfs:label ?l }")]
       (is (instance? Db result))
       (is (= (:prefixes db) (:prefixes result)))
       (is (= #{"kat" "del"
                (term/->LangString "hund" "da") (term/->LangString "dog" "en")}
-             (set (map '?l (theo/q "SELECT ?l WHERE { ?s ex:name ?l }" result))))
+             (set (map '?l (theo/q result
+                                   "SELECT ?l WHERE { ?s ex:name ?l }"))))
           "a CONSTRUCT returns a db that can be queried"))
-    (is (= 4 (.size ^Model (:model (theo/q "DESCRIBE ex:a" db))))
+    (is (= 4 (.size ^Model (:model (theo/q db "DESCRIBE ex:a"))))
         "Jena describes ex:a with the triples of its blank node too")))
 
 (deftest timeout
   (let [db (theo/db (ModelFactory/createDefaultModel) {:prefixes prefixes})]
     (theo/transact! db (for [i (range 100)] [:ex/s :ex/p i]))
-    (is (= 100 (count (theo/q "SELECT * WHERE { ?s ?p ?o }" db nil
+    (is (= 100 (count (theo/q db "SELECT * WHERE { ?s ?p ?o }" nil
                              {:timeout 10000}))))
     (is (thrown? QueryCancelledException
-                 (theo/q "SELECT * WHERE { ?a ?p ?w . ?b ?p ?x . ?c ?p ?y }"
-                        db nil {:timeout 50}))
+                 (theo/q db "SELECT * WHERE { ?a ?p ?w . ?b ?p ?x . ?c ?p ?y }"
+                         nil {:timeout 50}))
         "a million rows take longer than 50 ms")))
 
 (def people
@@ -421,7 +423,7 @@
                        :ex/_knows [{:rdf/about :ex/luke}]}])
     (is (= #{[:ex/jon :ex/luke] [:ex/luke :ex/hannah]}
            (set (map (juxt '?a '?b)
-                     (theo/q "SELECT * WHERE { ?a ex:knows ?b }" db))))
+                     (theo/q db "SELECT * WHERE { ?a ex:knows ?b }"))))
         "a predicate such as :ex/_knows links the other way"))
   (let [m  (ModelFactory/createDefaultModel)
         db (theo/db m {:prefixes prefixes})]
@@ -448,18 +450,16 @@
                       {:rdf/about   :ex/groceries
                        :ex/contents (theo/rdf-bag [:ex/apple :ex/banana
                                                   :ex/orange])}])
-    (is (true? (theo/q "ASK { ex:race ex:starters ?l0 .
-                             ?l0 rdf:first ex:luke ; rdf:rest ?l1 .
-                             ?l1 rdf:first ex:stuart ; rdf:rest ?l2 .
-                             ?l2 rdf:first ex:joe ; rdf:rest rdf:nil }"
-                      db)))
-    (is (false? (theo/q "ASK { ?l a rdf:List }" db))
+    (is (true? (theo/q db "ASK { ex:race ex:starters ?l0 .
+                                ?l0 rdf:first ex:luke ; rdf:rest ?l1 .
+                                ?l1 rdf:first ex:stuart ; rdf:rest ?l2 .
+                                ?l2 rdf:first ex:joe ; rdf:rest rdf:nil }")))
+    (is (false? (theo/q db "ASK { ?l a rdf:List }"))
         "as in Turtle, a list has no rdf:type")
     (is (= :rdf/nil (theo/rdf-list [])))
-    (is (true? (theo/q "ASK { ex:groceries ex:contents ?bag .
-                             ?bag a rdf:Bag ; rdf:_1 ex:apple ;
-                                  rdf:_2 ex:banana ; rdf:_3 ex:orange }"
-                      db))
+    (is (true? (theo/q db "ASK { ex:groceries ex:contents ?bag .
+                                ?bag a rdf:Bag ; rdf:_1 ex:apple ;
+                                     rdf:_2 ex:banana ; rdf:_3 ex:orange }"))
         "the members start at rdf:_1, as in RDF Schema")
     (is (= {:rdf/type :rdf/Seq :rdf/_1 :ex/a :rdf/_2 :ex/b}
            (theo/rdf-seq [:ex/a :ex/b])))
@@ -502,9 +502,10 @@
                     "            ds:total_population ?pop . ?e ?a ?v }")
         tuples (fn [vars bindings]
                  (set (map (apply juxt vars)
-                           (theo/q (str "SELECT DISTINCT " (str/join " " vars)
-                                       " " where)
-                                  @census bindings))))]
+                           (theo/q @census
+                                   (str "SELECT DISTINCT " (str/join " " vars)
+                                        " " where)
+                                   bindings))))]
     (is (= #{["90001" "57110"]} (tuples '[?zip ?pop] {'?zip "90001"}))
         "one variable, one value")
     (is (= #{["90001" "57110"] ["90005" "37681"]}
@@ -525,8 +526,8 @@
 
 (deftest retract
   (doseq [db (people-dbs)
-          :let [names #(set (map '?n (theo/q "SELECT ?n WHERE { ?s ex:name ?n }"
-                                            db)))]]
+          :let [names #(set (map '?n (theo/q db
+                                             "SELECT ?n WHERE { ?s ex:name ?n }")))]]
     (is (identical? db (theo/retract! db [:ex/luke :ex/age '_])))
     (is (nil? (:ex/age (theo/entity db :ex/luke))) "_ matches anything")
     (theo/retract! db [[:ex/jim :ex/name "Jim"] [:ex/sara :ex/name "Sara"]])
@@ -547,7 +548,7 @@
                                  {:prefixes prefixes})
                          people :ex/g)]
     (theo/retract! db ['_ :ex/name '_] :ex/g)
-    (is (empty? (theo/q "SELECT * WHERE { GRAPH ex:g { ?s ex:name ?n } }" db))
+    (is (empty? (theo/q db "SELECT * WHERE { GRAPH ex:g { ?s ex:name ?n } }"))
         "in a named graph")))
 
 (deftest update!

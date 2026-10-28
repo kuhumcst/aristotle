@@ -33,31 +33,32 @@
                   [:ex/a :ex/part '_part]]))
 
 (deftest calls
-  (is (= [{'?y 42}] (theo/q "SELECT ?y WHERE { BIND (fn:twice(21) AS ?y) }" db)))
+  (is (= [{'?y 42}]
+         (theo/q db "SELECT ?y WHERE { BIND (fn:twice(21) AS ?y) }")))
   (is (= [{'?s :ex/b}]
-         (theo/q "SELECT ?s WHERE { ?s ex:n ?n FILTER (fn:twice(?n) > 10) }" db))
+         (theo/q db
+                 "SELECT ?s WHERE { ?s ex:n ?n FILTER (fn:twice(?n) > 10) }"))
       "in a FILTER")
   (is (= [{'?y "a"}]
-         (theo/q "SELECT ?y WHERE { BIND (fn:local-name(ex:a) AS ?y) }" db))
+         (theo/q db "SELECT ?y WHERE { BIND (fn:local-name(ex:a) AS ?y) }"))
       "an IRI comes in as a keyword")
   (is (= [{'?y :ex/abc}]
-         (theo/q "SELECT ?y WHERE { BIND (fn:resource(\"abc\") AS ?y) }" db))
+         (theo/q db "SELECT ?y WHERE { BIND (fn:resource(\"abc\") AS ?y) }"))
       "a keyword goes out as an IRI")
   (is (= [{'?y "da"}]
-         (theo/q "SELECT ?y WHERE { ex:a rdfs:label ?l
-                                  BIND (fn:lang(?l) AS ?y) }"
-                db))
+         (theo/q db "SELECT ?y WHERE { ex:a rdfs:label ?l
+                                     BIND (fn:lang(?l) AS ?y) }"))
       "a language-tagged string comes in as a LangString")
   (is (= [{'?y true}]
-         (theo/q "SELECT ?y WHERE { ex:a ex:part ?p BIND (fn:blank(?p) AS ?y) }"
-                db))
+         (theo/q db
+                 "SELECT ?y WHERE { ex:a ex:part ?p BIND (fn:blank(?p) AS ?y) }"))
       "a blank node comes in as a symbol")
   (is (= [{}]
-         (theo/q "SELECT ?y WHERE { BIND (fn:local-name(\"<urn:x>\") AS ?y) }"
-                db))
+         (theo/q db
+                 "SELECT ?y WHERE { BIND (fn:local-name(\"<urn:x>\") AS ?y) }"))
       "a nil leaves the result unbound")
   (is (thrown? Exception
-               (theo/q "SELECT ?y WHERE { BIND (fn:fail(1) AS ?y) }" db))
+               (theo/q db "SELECT ?y WHERE { BIND (fn:fail(1) AS ?y) }"))
       "an exception fails the query")
   (is (thrown-with-msg? ExceptionInfo #"Not an IRI"
                         (function/register! :nowhere/f identity))))

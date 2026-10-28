@@ -388,11 +388,11 @@
   boolean. A CONSTRUCT or DESCRIBE returns a new db of an in-memory Model
   of the triples, with the prefixes of `db`. The query runs in a read
   transaction."
-  ([x db]
-   (q x db nil nil))
-  ([x db bindings]
-   (q x db bindings nil))
-  ([x {:keys [^Model model ^Dataset dataset prefixes] :as db} bindings
+  ([db x]
+   (q db x nil nil))
+  ([db x bindings]
+   (q db x bindings nil))
+  ([{:keys [^Model model ^Dataset dataset prefixes] :as db} x bindings
     {:keys [timeout] :as opts}]
    (let [parsed       (if (string? x) (query x prefixes) x)
          ^Query bound (cond-> parsed
@@ -446,7 +446,7 @@
       (let [expand (fn [x]
                      (if (and (term/blank-node? x) (not (seen x)))
                        (with-meta (describe db
-                                            (q properties-query db {'?s x})
+                                            (q db properties-query {'?s x})
                                             (conj seen x))
                          {:subject x})
                        x))]
@@ -459,10 +459,10 @@
   Model infers: those in neither its raw graph nor its schema."
   [{:keys [^Model model prefixes] :as db} subject rows]
   (let [^BaseInfGraph g (.getGraph model)
-        rows-in         #(q properties-query
-                            (->Db (ModelFactory/createModelForGraph %)
+        rows-in         #(q (->Db (ModelFactory/createModelForGraph %)
                                   nil
                                   prefixes)
+                            properties-query
                             {'?s subject})
         asserted        (into #{}
                               (mapcat rows-in)
@@ -484,7 +484,7 @@
   [{:keys [^Model model ^Dataset dataset] :as db} subject]
   (txn/calculate-read
     (or dataset model)
-    #(let [rows (q properties-query db {'?s subject})]
+    #(let [rows (q db properties-query {'?s subject})]
        (with-meta (describe db rows #{subject})
          (cond-> {:subject subject}
            (and model (instance? BaseInfGraph (.getGraph model)))

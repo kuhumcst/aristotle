@@ -68,8 +68,8 @@ Make a db in memory and write some data to it:
 Then query it, or read a subject as a map:
 
 ```clojure
-(theo/q "SELECT ?name WHERE { ?p ex:knows ?f . ?f rdfs:label ?name }"
-        db
+(theo/q db
+        "SELECT ?name WHERE { ?p ex:knows ?f . ?f rdfs:label ?name }"
         {'?p :ex/alice})
 ;; => [{?name "Bob"} {?name "Carol"}]
 
@@ -193,9 +193,9 @@ For an RDF list, use `theo/rdf-list` in a map, and for a container
 Queries
 -------
 
-Run a SPARQL query with `theo/q`, the query first as in Datomic. It parses
-a string with the prefixes of the db, so the query needs no PREFIX lines
-for them.
+Run a SPARQL query with `theo/q`. Unlike Datomic's `q`, it takes the db
+first, as every other function that takes a db does. It parses a string
+with the prefixes of the db, so the query needs no PREFIX lines for them.
 
 A binding gives a variable one value or several, or gives several
 variables rows of values, e.g. `{'[?p ?name] [[:ex/bob nil]]}` with nil for
@@ -203,8 +203,8 @@ unbound. The values go in as RDF terms in a VALUES block at the start of
 the WHERE clause:
 
 ```clojure
-(theo/q "SELECT ?p ?name WHERE { ?p rdfs:label ?name }"
-        db
+(theo/q db
+        "SELECT ?p ?name WHERE { ?p rdfs:label ?name }"
         {'?p [:ex/bob :ex/carol]})
 ;; => [{?p :ex/bob ?name "Bob"} {?p :ex/carol ?name "Carol"}]
 ```
@@ -234,7 +234,7 @@ to your deps and pass the string it formats to `theo/q`:
                        :select   '[?name]
                        :where    '[[?p :rdfs/label ?name]]}))
 
-(theo/q labels db {'?p :ex/alice})
+(theo/q db labels {'?p :ex/alice})
 ;; => [{?name "Alice"}]
 ```
 
@@ -362,7 +362,7 @@ result unbound:
 
 (function/register! :ex/upper str/upper-case prefixes)
 
-(theo/q "SELECT (ex:upper(?n) AS ?u) WHERE { ex:bob rdfs:label ?n }" db)
+(theo/q db "SELECT (ex:upper(?n) AS ?u) WHERE { ex:bob rdfs:label ?n }")
 ;; => [{?u "BOB"}]
 ```
 

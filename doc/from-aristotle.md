@@ -18,7 +18,7 @@ name:
 | `aa/add`                                 | `theo/transact!`                      |
 | `aa/read`                                | `theo/read!`                          |
 | `(aa/write graph file format)`           | `(theo/write db file)`                |
-| `query/run` with the SPARQL algebra      | `theo/q` with SPARQL, the query first |
+| `query/run` with the SPARQL algebra      | `theo/q` with SPARQL                  |
 | `query/build` and `query/parse`          | `theo/query`                          |
 | `(query/pull graph subject pattern)`     | `(theo/pull db pattern subject)`      |
 | `graph/data`                             | `convert/data`                        |
