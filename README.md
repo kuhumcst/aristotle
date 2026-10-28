@@ -213,6 +213,10 @@ can set a `:timeout` in milliseconds. Jena only checks it when the query
 moves on to its next result, so for a hard limit, see
 `txn/with-hard-timeout`.
 
+Where you run a query with Jena's own API, e.g. to keep its ResultSet,
+`theo/data` turns each Jena node in the results into the value that
+`theo/q` would return.
+
 To write queries as data, add [Flint](https://github.com/yetanalytics/flint)
 to your deps and pass the string it formats to `theo/q`:
 

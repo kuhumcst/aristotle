@@ -300,6 +300,16 @@
      (QueryFactory/parse q s nil Syntax/defaultQuerySyntax)
      q)))
 
+(defn data
+  "The value of the Jena `node` as a query returns it, with IRIs under the
+  `prefixes` as keywords, default-prefixes unless given, e.g. for the rows of
+  a ResultSet from Jena's own query API. A nil node, e.g. an unbound
+  variable, is nil."
+  ([node]
+   (data node term/default-prefixes))
+  ([node prefixes]
+   (convert/data node prefixes)))
+
 (defn- variable
   "The Jena Var of the symbol `sym`, e.g. ?s."
   ^Var [sym]

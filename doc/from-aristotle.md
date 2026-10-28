@@ -21,6 +21,7 @@ name:
 | `query/run` with the SPARQL algebra      | `theo/q` with SPARQL, the query first |
 | `query/build` and `query/parse`          | `theo/query`                          |
 | `(query/pull graph subject pattern)`     | `(theo/pull db pattern subject)`      |
+| `graph/data`                             | `theo/data`                           |
 | `registry/prefix`, `registry/with`       | the `:prefixes` option of `theo/db`   |
 | `inference/rule`                         | Jena rule text and `rules/parse`      |
 | `validation/validate`                    | `shacl/validate`                      |
