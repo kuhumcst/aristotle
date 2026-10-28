@@ -434,6 +434,10 @@
   "The query of the predicates and objects of ?s."
   (query "SELECT ?p ?o WHERE { ?s ?p ?o }"))
 
+(def subjects-query
+  "The query of the subjects that link to ?o by the predicate ?p."
+  (query "SELECT ?s WHERE { ?s ?p ?o }"))
+
 (defn- property-map
   "The map of the predicate of each of the `rows` to its object, or to a set
   of its objects when it has several."
@@ -460,10 +464,10 @@
     (fn [v]
       (let [expand (fn [x]
                      (if (and (term/blank-node? x) (not (seen x)))
-                       (with-meta (describe db
-                                            (q db properties-query {'?s x})
-                                            (conj seen x))
-                         {:subject x})
+                       (assoc (describe db
+                                        (q db properties-query {'?s x})
+                                        (conj seen x))
+                         :rdf/about x)
                        x))]
         (if (set? v)
           (into #{} (map expand) v)
@@ -489,63 +493,81 @@
 ;; SHACL's sh:maxCount 1 or owl:FunctionalProperty, instead of by the data
 (defn entity
   "The properties of `subject` in `db` as a map of predicate to value, or to
-  a set of values when it has several, and {} when it has none.
+  a set of values when it has several, with :rdf/about for the subject, or
+  nil when it has none.
 
-  A blank node among the values becomes a map of its own properties, and
-  so on, as in a Concise Bounded Description. The metadata of each map has
-  its :subject. For a db of an inference Model, the metadata of the entity
-  also has the :inferred properties: those in neither the raw graph nor the
-  schema. The entity is read in one read transaction."
+  A blank node among the values becomes a map of its own properties and its
+  :rdf/about, and so on, as in a Concise Bounded Description, so the entity
+  can go back into transact! as it is. For a db of an inference Model, the
+  metadata of the entity has the :inferred properties: those in neither the
+  raw graph nor the schema. The entity is read in one read transaction."
   [{:keys [^Model model ^Dataset dataset] :as db} subject]
   (txn/calculate-read
     (or dataset model)
     #(let [rows (q db properties-query {'?s subject})]
-       (with-meta (describe db rows #{subject})
-         (cond-> {:subject subject}
+       (when (seq rows)
+         (cond-> (assoc (describe db rows #{subject}) :rdf/about subject)
            (and model (instance? BaseInfGraph (.getGraph model)))
-           (assoc :inferred (inferred db subject rows)))))))
+           (with-meta {:inferred (inferred db subject rows)}))))))
 
 (defn- pull*
   "The part of the entity `x` in `db` that the `pattern` selects, with its
   :rdf/about, at the `depth` of recursion, past the subjects `seen`. The
   entity is a subject, or the map of a blank node that entity expanded."
   [db pattern x depth seen]
-  (let [e (if (map? x) x (entity db x))]
-    (when (seq e)
-      (let [subject (if (map? x) (:subject (meta x)) x)
-            seen    (conj seen subject)
-            wild?   (some #{'*} pattern)
-            attrs   (set (remove #(or (map? %) (= '* %)) pattern))
-            nested  (apply merge (filter map? pattern))
-            pull-v  (fn [spec v]
-                      (let [id (if (map? v) (:subject (meta v)) v)]
-                        (or (when (or (map? v) (keyword? v) (term/blank-node? v)
-                                      (term/iri-string? v))
-                              (cond
-                                (vector? spec)
-                                (pull* db spec v 0 #{})
+  (let [e        (if (map? x) x (entity db x))
+        subject  (if (map? x) (:rdf/about x) x)
+        seen     (conj seen subject)
+        wild?    (some #{'*} pattern)
+        attrs    (set (remove #(or (map? %) (= '* %)) pattern))
+        nested   (apply merge (filter map? pattern))
+        incoming (fn [p]
+                   (let [ss (into #{}
+                                  (map '?s)
+                                  (q db subjects-query
+                                     {'?p (reverse-property p) '?o subject}))]
+                     (if (next ss) ss (first ss))))
+        selected (merge (into {}
+                              (filter #(or wild?
+                                           (attrs (key %))
+                                           (contains? nested (key %))))
+                              (dissoc e :rdf/about))
+                        (into {}
+                              (keep #(when-let [v (and (reverse-property %)
+                                                       (incoming %))]
+                                       [% v]))
+                              (concat attrs (keys nested))))
+        pull-v   (fn [spec v]
+                   (let [id (if (map? v) (:rdf/about v) v)]
+                     (or (when (or (map? v) (keyword? v) (term/blank-node? v)
+                                   (term/iri-string? v))
+                           (cond
+                             (vector? spec)
+                             (pull* db spec v 0 #{})
 
-                                (and (not (seen id))
-                                     (or (= '... spec) (< depth spec)))
-                                (pull* db pattern v (inc depth) seen)))
-                            v)))]
-        (reduce-kv (fn [m p v]
-                     (if-let [spec (get nested p)]
-                       (assoc m p (if (set? v)
-                                    (into #{} (map #(pull-v spec %)) v)
-                                    (pull-v spec v)))
-                       (if (or wild? (attrs p))
-                         (assoc m p v)
-                         m)))
-                   {:rdf/about subject}
-                   e)))))
+                             (and (not (seen id))
+                                  (or (= '... spec) (< depth spec)))
+                             (pull* db pattern v (inc depth) seen)))
+                         v)))]
+    (when (or e (seq selected))
+      (reduce-kv (fn [m p v]
+                   (assoc m p (if-let [spec (get nested p)]
+                                (if (set? v)
+                                  (into #{} (map #(pull-v spec %)) v)
+                                  (pull-v spec v))
+                                v)))
+                 {:rdf/about subject}
+                 selected))))
 
 (defn pull
   "The properties of `subject` in `db` that the `pattern` selects, in the
   style of Datomic's pull, with :rdf/about for the subject, or nil when it
-  has none. The pattern is a vector of:
+  has no properties and the pattern selects no links to it. The pattern is
+  a vector of:
 
   - a predicate, e.g. :rdfs/label, for its values;
+  - a predicate such as :ex/_knows, as in transact!, for the subjects that
+    link to this one by :ex/knows;
   - '*, for every predicate;
   - a map of predicate to what to pull from its values: a pattern of its
     own, e.g. {:ex/friend [:ex/name]}, '... for this pattern again at any

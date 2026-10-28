@@ -70,9 +70,9 @@
            :entries   entries})))))
 
 (defn by-severity
-  "The report `entries` grouped by their :severity."
-  [entries]
-  (group-by :severity entries))
+  "The entries of the `report` grouped by their :severity."
+  [report]
+  (group-by :severity (:entries report)))
 
 (defn violations?
   "Whether the `report` has an entry of :sh/Violation, rather than only

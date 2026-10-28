@@ -60,7 +60,7 @@
       (is (string? (:message jim)))
       (is (shacl/violations? result))
       (is (= #{:sh/Violation :sh/Warning}
-             (set (keys (shacl/by-severity (:entries result))))))
+             (set (keys (shacl/by-severity result)))))
       (let [luke (shacl/validate db shapes :ex/luke)]
         (is (= [:sh/Warning] (map :severity (:entries luke)))
             "only the node")

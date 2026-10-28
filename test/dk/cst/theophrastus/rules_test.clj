@@ -55,7 +55,8 @@
                                                   (model-of data))
                                  {:prefixes prefixes})
                 rex      (theo/entity db :ex/rex)]]
-    (is (= {:ex/knows :ex/a} (theo/entity db :ex/b)) (str mode))
+    (is (= {:rdf/about :ex/b :ex/knows :ex/a} (theo/entity db :ex/b))
+        (str mode))
     (is (= #{:ex/Dog :ex/Animal} (:rdf/type rex))
         (str mode ", with the schema"))
     (is (= {:rdf/type :ex/Animal} (:inferred (meta rex))) (str mode)))

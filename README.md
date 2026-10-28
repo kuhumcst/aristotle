@@ -74,7 +74,9 @@ Then query it, or read a subject as a map:
 ;; => [{?name "Bob"} {?name "Carol"}]
 
 (theo/entity db :ex/alice)
-;; => {:rdfs/label "Alice" :ex/knows #{:ex/bob :ex/carol}}
+;; => {:rdf/about  :ex/alice
+;;     :rdfs/label "Alice"
+;;     :ex/knows   #{:ex/bob :ex/carol}}
 ```
 
 Unlike a Datomic db, a db isn't a value, since later writes change it. The
@@ -203,7 +205,7 @@ the union of the named graphs:
 (theo/transact! staff [[:ex/dave :rdfs/label "Dave"]])
 
 (theo/entity (theo/union-graph db) :ex/dave)
-;; => {:rdfs/label "Dave"}
+;; => {:rdf/about :ex/dave :rdfs/label "Dave"}
 ```
 
 Each one is a view of the Dataset, and cheap to make. It has the prefixes
@@ -268,17 +270,23 @@ Read the properties of a subject as a map with `theo/entity`:
 
 ```clojure
 (theo/entity db :ex/alice)
-;; => {:rdfs/label  "Alice"
+;; => {:rdf/about   :ex/alice
+;;     :rdfs/label  "Alice"
 ;;     :ex/knows    #{:ex/bob :ex/carol}
-;;     :ex/projects {:rdf/first :ex/one
-;;                   :rdf/rest  {:rdf/first :ex/two :rdf/rest :rdf/nil}}}
+;;     :ex/projects {:rdf/about _b1
+;;                   :rdf/first :ex/one
+;;                   :rdf/rest  {:rdf/about _b2
+;;                               :rdf/first :ex/two
+;;                               :rdf/rest  :rdf/nil}}}
 ```
 
+The subject is the `:rdf/about` of the map, as in `transact!`, so an entity
+can go back into `transact!` as it is. A subject with no properties is nil.
 A property has one value, or a set when the data has several. A blank node
 among the values becomes a map of its own properties, as in a
-[Concise Bounded Description](https://www.w3.org/submissions/CBD/). The
-metadata of each map has its `:subject`. For a db of an inference Model,
-the metadata of the entity also has the `:inferred` properties (see
+[Concise Bounded Description](https://www.w3.org/submissions/CBD/), with its
+label as `:rdf/about`. For a db of an inference Model, the metadata of the
+entity has the `:inferred` properties (see
 [Rules](#rules-functions-and-shacl)).
 
 Pull a pattern with `theo/pull`, in Datomic's order:
@@ -293,7 +301,8 @@ Pull a pattern with `theo/pull`, in Datomic's order:
 
 A pattern can also have `'*` for every predicate. A map such as
 `{:ex/knows '...}` pulls the same pattern again from each value, and a
-number in place of `'...` limits the depth.
+number in place of `'...` limits the depth. A reverse predicate such as
+`:ex/_knows`, as in `transact!`, pulls the subjects that link to this one.
 
 Transactions and TDB2
 ---------------------
@@ -316,7 +325,7 @@ that starts as a read and becomes a write at the first write:
 
 ```clojure
 (txn/with-transaction (:dataset db)
-  (when (empty? (theo/entity db :ex/bob))
+  (when-not (theo/entity db :ex/bob)
     (theo/transact! db [[:ex/bob :rdfs/label "Bob"]])))
 ```
 
@@ -365,7 +374,7 @@ its inference Model:
 (theo/transact! inf-db [[:ex/alice :ex/knows :ex/bob]])
 
 (meta (theo/entity inf-db :ex/bob))
-;; => {:subject :ex/bob :inferred {:ex/knows :ex/alice}}
+;; => {:inferred {:ex/knows :ex/alice}}
 ```
 
 For backward rules, add `rules/table-all` to the rules, so that a

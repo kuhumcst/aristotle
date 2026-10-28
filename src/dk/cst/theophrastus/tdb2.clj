@@ -1,7 +1,9 @@
 (ns dk.cst.theophrastus.tdb2
   "TDB2 databases on disk: connecting and compacting."
-  (:require [dk.cst.theophrastus :as theo])
+  (:require [dk.cst.theophrastus :as theo]
+            [dk.cst.theophrastus.txn :as txn])
   (:import [org.apache.jena.query Dataset]
+           [org.apache.jena.sparql.core DatasetGraph]
            [org.apache.jena.tdb2 DatabaseMgr TDB2Factory]))
 
 (defn connect
@@ -13,9 +15,12 @@
    (theo/db (TDB2Factory/connectDataset (str dir)) opts)))
 
 (defn compact!
-  "Compact the TDB2 database of `x`, a db or a Dataset, and delete the
-  generation it replaces. TDB2 only frees the space of deleted and changed
-  data when it compacts."
-  [x]
-  (let [^Dataset ds (if (instance? Dataset x) x (:dataset x))]
-    (DatabaseMgr/compact (.asDatasetGraph ds) true)))
+  "Compact the TDB2 database of `db`, which may be a view of one of its
+  graphs, and delete the generation it replaces. TDB2 only frees the space
+  of deleted and changed data when it compacts."
+  [{:keys [model dataset] :as db}]
+  (let [t   (txn/transactional (or dataset model))
+        dsg (if (instance? Dataset t) (.asDatasetGraph ^Dataset t) t)]
+    (if (and dsg (DatabaseMgr/isTDB2 ^DatasetGraph dsg))
+      (DatabaseMgr/compact dsg true)
+      (throw (ex-info "Not a db of a TDB2 database" {:db db})))))

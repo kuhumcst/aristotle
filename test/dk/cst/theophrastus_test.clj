@@ -4,6 +4,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.walk :as walk]
             [dk.cst.theophrastus :as theo]
             [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.txn :as txn]
@@ -38,6 +39,15 @@
                           model model
                           iri   (.getNamedModel dataset ^String iri)
                           :else (.getDefaultModel dataset)))))))
+
+(defn without-blank-labels
+  "The entity `e` without the :rdf/about of its blank nodes, whose labels
+  differ from store to store."
+  [e]
+  (walk/postwalk #(if (and (map? %) (term/blank-node? (:rdf/about %)))
+                    (dissoc % :rdf/about)
+                    %)
+                 e))
 
 (defn temp-file
   "A temporary file with the `suffix` and the `content`."
@@ -147,7 +157,7 @@
     (is (= 1 (graph-size db "http://example.com/g"))
         "the first write adds the graph")
     (is (= 1 (graph-size db)) "the default graph")
-    (is (= {:ex/p "o"} (theo/entity union :ex/s))
+    (is (= {:rdf/about :ex/s :ex/p "o"} (theo/entity union :ex/s))
         "the union of the named graphs, without the default graph")
     (is (= prefixes (:prefixes g) (:prefixes union))
         "a view keeps the prefixes")
@@ -369,16 +379,16 @@
           :let [luke (theo/entity db :ex/luke)]]
     (is (= "Luke" (:ex/name luke)) "one value")
     (is (= #{:ex/jim :ex/jamie} (:ex/friends luke)) "a set of several values")
-    (is (= :ex/luke (:subject (meta luke))))
-    (is (= {:ex/city     "Copenhagen"
-            :ex/building {:ex/floor 3}}
+    (is (= :ex/luke (:rdf/about luke)))
+    (is (= {:rdf/about   '_address
+            :ex/city     "Copenhagen"
+            :ex/building {:rdf/about '_building :ex/floor 3}}
            (:ex/address luke))
         "blank nodes become maps, as in a Concise Bounded Description")
-    (is (= '_address (:subject (meta (:ex/address luke)))))
-    (is (= {:ex/next {:ex/next '_c1}}
+    (is (= {:rdf/about '_c1 :ex/next {:rdf/about '_c2 :ex/next '_c1}}
            (:ex/start (theo/entity db :ex/loop)))
         "a cycle of blank nodes stops at the first one seen again")
-    (is (= {} (theo/entity db :ex/nobody)))
+    (is (nil? (theo/entity db :ex/nobody)))
     (is (nil? (:inferred (meta luke))) "no inference model")))
 
 (deftest inferred-entity
@@ -427,6 +437,18 @@
             :ex/address  {:rdf/about '_address :ex/city "Copenhagen"}}
            (theo/pull db [{:ex/address [:ex/city]}] :ex/luke))
         "a nested pattern on a blank node")
+    (is (= {:rdf/about :ex/hannah :ex/name "Hannah" :ex/_spouse :ex/luke}
+           (theo/pull db [:ex/name :ex/_spouse] :ex/hannah))
+        "a reverse predicate, as in transact!")
+    (is (= {:rdf/about  :ex/luke
+            :ex/_friends {:rdf/about :ex/thom :ex/name "Thom"}}
+           (theo/pull db [{:ex/_friends [:ex/name]}] :ex/luke))
+        "a nested pattern on a reverse predicate")
+    (is (= {:rdf/about '_c1 :ex/_start :ex/loop}
+           (theo/pull db [:ex/_start] '_c1))
+        "the subjects that link to a blank node")
+    (is (not (contains? (theo/pull db '[*] :ex/hannah) :ex/_spouse))
+        "* only has the predicates of the subject itself")
     (let [friend-of (fn [e n]
                       (first (filter #(= n (:ex/name %)) (:ex/friends e))))
           jim       #(friend-of
@@ -462,15 +484,17 @@
     (is (= 1 (.size m)) "nil gives no value, and an empty map no triples"))
   (let [db (theo/db (ModelFactory/createDefaultModel) {:prefixes prefixes})]
     (theo/transact! db [{:rdf/about :ex/a :ex/address {:ex/city "Copenhagen"}}])
-    (is (= {:ex/address {:ex/city "Copenhagen"}} (theo/entity db :ex/a))
-        "a nested map without an :rdf/about is a blank node"))
+    (let [address (:ex/address (theo/entity db :ex/a))]
+      (is (= {:ex/city "Copenhagen"} (dissoc address :rdf/about)))
+      (is (term/blank-node? (:rdf/about address))
+          "a nested map without an :rdf/about is a blank node")))
   (doseq [db (people-dbs)
           :let [luke (theo/entity db :ex/luke)
                 copy (theo/db (ModelFactory/createDefaultModel)
                              {:prefixes prefixes})]]
-    (theo/transact! copy [(assoc luke :rdf/about :ex/luke)])
+    (theo/transact! copy [luke])
     (is (= luke (theo/entity copy :ex/luke))
-        "an entity written back reads the same")))
+        "an entity written back as it is reads the same")))
 
 (deftest lists-and-containers
   (let [db (theo/db (ModelFactory/createDefaultModel) {:prefixes prefixes})]
@@ -507,8 +531,9 @@
     (is (str/includes? (slurp f) "PREFIX ex:") "with the prefixes of the db")
     (theo/read! copy f)
     (is (= (count people) (graph-size copy)))
-    (is (= (theo/entity (first (people-dbs)) :ex/luke)
-           (theo/entity copy :ex/luke))))
+    (is (= (without-blank-labels (theo/entity (first (people-dbs)) :ex/luke))
+           (without-blank-labels (theo/entity copy :ex/luke)))
+        "Turtle gives the blank nodes new labels"))
   (is (thrown-with-msg? ExceptionInfo #"Not a syntax for one graph"
                         (theo/write (first (people-dbs)) (temp-file ".nq" "")))))
 
@@ -567,7 +592,8 @@
     (is (= #{"Luke" "Hannah" "Thom" "Jamie"} (names))
         "an error in one pattern leaves the db as it was")
     (theo/retract! db ['_address :ex/city '_])
-    (is (= {:ex/building {:ex/floor 3}}
+    (is (= {:rdf/about   '_address
+            :ex/building {:rdf/about '_building :ex/floor 3}}
            (:ex/address (theo/entity db :ex/luke)))
         "a blank node from the data as a pattern")
     (is (thrown-with-msg? ExceptionInfo #"Not a pattern"

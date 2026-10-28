@@ -27,17 +27,19 @@
         (theo/transact! db [[:ex/s :ex/p "o"]])
         (release db))
       (let [db (tdb2/connect dir {:prefixes prefixes})]
-        (is (= {:ex/p "o"} (theo/entity db :ex/s)) "the data is on disk")
+        (is (= "o" (:ex/p (theo/entity db :ex/s))) "the data is on disk")
         (theo/retract! db ['_ '_ '_])
         (theo/transact! db [[:ex/s :ex/p "new"]])
         (tdb2/compact! db)
-        (is (= {:ex/p "new"} (theo/entity db :ex/s))
+        (is (= "new" (:ex/p (theo/entity db :ex/s)))
             "the data survives compacting")
         (is (.exists (io/file dir "Data-0002")))
         (is (not (.exists (io/file dir "Data-0001")))
             "the generation it replaces is deleted")
-        (tdb2/compact! (:dataset db))
-        (is (.exists (io/file dir "Data-0003")) "a Dataset works too")
+        (tdb2/compact! (theo/named-graph db :ex/g))
+        (is (.exists (io/file dir "Data-0003")) "a view of a graph works too")
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not a db of a TDB2"
+                              (tdb2/compact! (theo/db))))
         (release db))
       (finally
         (doseq [f (reverse (file-seq (io/file dir)))]
