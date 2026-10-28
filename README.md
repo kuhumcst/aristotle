@@ -241,6 +241,19 @@ can set a `:timeout` in milliseconds. Jena only checks it when the query
 moves on to its next result, so for a hard limit, see
 `txn/with-hard-timeout`.
 
+For a result too large to hold in memory, `theo/reducible` takes the same
+arguments and runs a SELECT as you reduce over it, one row at a time:
+
+```clojure
+(with-open [w (clojure.java.io/writer "labels.txt")]
+  (run! (fn [{:syms [?l]}] (.write w (str ?l "\n")))
+        (theo/reducible db "SELECT ?l WHERE { ?s rdfs:label ?l }")))
+```
+
+Its read transaction lasts as long as the reduction, so use it with
+`reduce`, `into`, `transduce` or `run!`. It isn't a collection, so `first`
+and `count` don't work on it.
+
 Where you run a query with Jena's own API, e.g. to keep its ResultSet,
 `convert/data` turns each Jena node in the results into the value that
 `theo/q` would return.

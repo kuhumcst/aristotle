@@ -306,6 +306,31 @@
     (is (thrown-with-msg? ExceptionInfo #"Not a variable"
                           (labels {'s :ex/a})))))
 
+(deftest reducible
+  (doseq [db (label-dbs)
+          :let [labels "SELECT * WHERE { ?s rdfs:label ?l }"
+                store  (or (:dataset db) (:model db))]]
+    (is (= (set (theo/q db labels)) (into #{} (theo/reducible db labels)))
+        "the rows of q")
+    (is (= (theo/q db labels {'?s :ex/b})
+           (into [] (theo/reducible db labels {'?s :ex/b})))
+        "with bindings")
+    (is (= 2 (count (into [] (take 2) (theo/reducible db labels))))
+        "a reduction that stops early")
+    (is (= :ok (txn/calculate-write store (constantly :ok)))
+        "the transaction ended with the early stop")
+    (is (thrown-with-msg? ExceptionInfo #"boom"
+                          (reduce (fn [_ _] (throw (ex-info "boom" {})))
+                                  nil
+                                  (theo/reducible db labels))))
+    (is (= :ok (txn/calculate-write store (constantly :ok)))
+        "the transaction ended with the exception")
+    (is (thrown-with-msg? ExceptionInfo #"Not a SELECT"
+                          (theo/reducible db "ASK { ?s ?p ?o }")))
+    (is (thrown? IllegalArgumentException
+                 (first (theo/reducible db labels)))
+        "not a collection")))
+
 (deftest values-as-nodes
   (let [db   (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})
         evil "x\" } ; DROP ALL ; SELECT * { ?s ?p \""]

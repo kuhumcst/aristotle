@@ -1,13 +1,15 @@
 (ns dk.cst.theophrastus
-  "A db of a Jena Model or Dataset, in the style of Datomic: db, q, entity,
-  pull, transact!, retract!, update!, read! and write. The functions that
-  change a db end in !."
+  "A db of a Jena Model or Dataset, in the style of Datomic: db and its views
+  default-graph, named-graph and union-graph, q, reducible, entity, pull,
+  transact!, retract!, update!, read! and write. The functions that change
+  a db end in !."
   (:require [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.txn :as txn]
             [dk.cst.theophrastus.term :as term]
             [clojure.java.io :as io]
             [clojure.string :as str])
-  (:import [java.io Writer]
+  (:import [clojure.lang IReduceInit]
+           [java.io Writer]
            [java.util.concurrent TimeUnit]
            [org.apache.jena.graph Graph GraphMemFactory GraphUtil Node
             NodeFactory Triple]
@@ -19,8 +21,8 @@
            [org.apache.jena.shared PrefixMapping]
            [org.apache.jena.sparql.core DatasetGraph Var]
            [org.apache.jena.sparql.engine.binding Binding BindingFactory]
-           [org.apache.jena.sparql.exec QueryExec RowSet UpdateExec
-            UpdateExecBuilder]
+           [org.apache.jena.sparql.exec QueryExec QueryExecBuilder RowSet
+            UpdateExec UpdateExecBuilder]
            [org.apache.jena.sparql.syntax ElementData ElementGroup]
            [org.apache.jena.update UpdateFactory UpdateRequest]))
 
@@ -367,17 +369,29 @@
     (.setQueryPattern q group)
     q))
 
-(defn- rows
-  "The rows of the `row-set` as maps of variable to value, with IRIs under
-  `prefixes` as keywords."
-  [^RowSet row-set prefixes]
-  (mapv (fn [^Binding b]
-          (into {}
-                (map (fn [^Var v]
-                       [(symbol (str "?" (.getVarName v)))
-                        (convert/data (.get b v) prefixes)]))
-                (iterator-seq (.vars b))))
-        (iterator-seq row-set)))
+(defn- row
+  "The Binding `b` as a map of variable to value, with IRIs under `prefixes`
+  as keywords."
+  [^Binding b prefixes]
+  (into {}
+        (map (fn [^Var v]
+               [(symbol (str "?" (.getVarName v)))
+                (convert/data (.get b v) prefixes)]))
+        (iterator-seq (.vars b))))
+
+(defn- exec-builder
+  "The Query of `x`, a SPARQL string or a Query, with the `bindings`, and
+  the QueryExecBuilder that runs it on `db` with the `opts` of q."
+  [{:keys [^Model model ^Dataset dataset prefixes]} x bindings
+   {:keys [timeout]}]
+  (let [parsed       (if (string? x) (query x prefixes) x)
+        ^Query bound (cond-> parsed
+                       (seq bindings) (bind bindings prefixes))
+        exec         (if dataset
+                       (QueryExec/dataset (.asDatasetGraph dataset))
+                       (QueryExec/graph (.getGraph model)))]
+    [bound (cond-> ^QueryExecBuilder (.query exec bound)
+             timeout (.timeout (long timeout) TimeUnit/MILLISECONDS))]))
 
 (defn- graph->db
   "A db of the in-memory Graph `g` that a query returned, with `prefixes`."
@@ -407,28 +421,54 @@
    (q db x nil nil))
   ([db x bindings]
    (q db x bindings nil))
-  ([{:keys [^Model model ^Dataset dataset prefixes] :as db} x bindings
-    {:keys [timeout] :as opts}]
-   (let [parsed       (if (string? x) (query x prefixes) x)
-         ^Query bound (cond-> parsed
-                        (seq bindings) (bind bindings prefixes))
-         exec         (if dataset
-                        (QueryExec/dataset (.asDatasetGraph dataset))
-                        (QueryExec/graph (.getGraph model)))
-         builder      (cond-> (.query exec bound)
-                        timeout (.timeout (long timeout)
-                                          TimeUnit/MILLISECONDS))]
+  ([{:keys [^Model model ^Dataset dataset prefixes] :as db} x bindings opts]
+   (let [[^Query bound ^QueryExecBuilder builder]
+         (exec-builder db x bindings opts)]
      (txn/calculate-read
        (or dataset model)
        #(with-open [qe (.build builder)]
           (cond
-            (.isSelectType bound)    (rows (.select qe) prefixes)
+            (.isSelectType bound)    (mapv (fn [b] (row b prefixes))
+                                           (iterator-seq (.select qe)))
             (.isAskType bound)       (.ask qe)
             (.isConstructType bound) (graph->db (.construct qe) prefixes)
             (.isDescribeType bound)  (graph->db (.describe qe) prefixes)
             :else (throw (ex-info (str "Not a SELECT, ASK, CONSTRUCT or "
                                        "DESCRIBE query: " bound)
                                   {:query bound}))))))))
+
+;; reducible rather than lazy, as next.jdbc's plan is, since a lazy seq
+;; could be read after the transaction or on another thread
+(defn reducible
+  "The rows of the SPARQL SELECT `x`, a string or a Query, on `db` with the
+  `bindings` and `opts` of q, as a reducible that runs the query when you
+  reduce it, e.g. with reduce, into, transduce or run!.
+
+  It hands the rows to the reducing function one at a time, in a read
+  transaction that ends with the reduction, also when it stops early or
+  throws, so only what the reduction keeps stays in memory. Each reduction
+  runs the query again, and since it isn't a collection, first, count and
+  seq don't work on it."
+  ([db x]
+   (reducible db x nil nil))
+  ([db x bindings]
+   (reducible db x bindings nil))
+  ([{:keys [^Model model ^Dataset dataset prefixes] :as db} x bindings opts]
+   (let [[^Query bound ^QueryExecBuilder builder]
+         (exec-builder db x bindings opts)]
+     (when-not (.isSelectType bound)
+       (throw (ex-info (str "Not a SELECT query: " bound) {:query bound})))
+     (reify IReduceInit
+       (reduce [_ f init]
+         (txn/calculate-read
+           (or dataset model)
+           #(with-open [qe (.build builder)]
+              (let [^RowSet rows (.select qe)]
+                (loop [acc init]
+                  (if (.hasNext rows)
+                    (let [acc (f acc (row (.next rows) prefixes))]
+                      (if (reduced? acc) @acc (recur acc)))
+                    acc))))))))))
 
 (def properties-query
   "The query of the predicates and objects of ?s."
