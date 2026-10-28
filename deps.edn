@@ -1,13 +1,31 @@
 {:paths   ["src"]
  :deps    {org.clojure/clojure              {:mvn/version "1.12.0"}
-           org.apache.jena/apache-jena-libs {:mvn/version "5.3.0"
-                                             :extension   "pom"}
-           ont-app/vocabulary               {:mvn/version "0.1.7"}
-
-           ;; Adds missing javax.xml.bind.DatatypeConverter in Java 9+
-           javax.xml.bind/jaxb-api          {:mvn/version "2.4.0-b180830.0359"}}
- :aliases {:test {:extra-paths ["test"]
+           ;; Jena's modules one by one, since the pom of a library can't
+           ;; point at the apache-jena-libs bundle: tools.build drops its type
+           org.apache.jena/jena-arq         {:mvn/version "6.2.0"}
+           org.apache.jena/jena-tdb2        {:mvn/version "6.2.0"}
+           org.apache.jena/jena-shacl       {:mvn/version "6.2.0"}
+           dk.simongray/langtag-clj         {:mvn/version "0.2.0"}}
+ :aliases {;; clojure -X:test  (logback prints Jena's log)
+           :test {:extra-paths ["test"]
                   :extra-deps  {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}
-                                ch.qos.logback/logback-classic       {:mvn/version "1.2.11"}}
+                                ch.qos.logback/logback-classic       {:mvn/version "1.6.5"}}
                   :main-opts   ["-m" "cognitect.test-runner"]
-                  :exec-fn     cognitect.test-runner.api/test}}}
+                  :exec-fn     cognitect.test-runner.api/test}
+
+           ;; clojure -M:cljs compile test  (the tests of the cljc
+           ;; namespaces in Node)
+           :cljs {:extra-paths ["test"]
+                  :extra-deps  {thheller/shadow-cljs {:mvn/version "3.5.8"}}
+                  :main-opts   ["-m" "shadow.cljs.devtools.cli"]}
+
+           ;; clojure -T:build jar | install | deploy  (see build.clj)
+           :build {:deps       {io.github.clojure/tools.build {:mvn/version "0.10.14"}
+                                slipset/deps-deploy            {:mvn/version "0.2.5"}}
+                   :ns-default build}
+
+           ;; clojure -M:test:nrepl
+           :nrepl {:extra-deps {nrepl/nrepl {:mvn/version "1.8.0"}}
+                   ;; lets nrepl interrupt runaway evaluations
+                   :jvm-opts   ["-Djdk.attach.allowAttachSelf"]
+                   :main-opts  ["-m" "nrepl.cmdline"]}}}

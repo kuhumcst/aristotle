@@ -1,0 +1,9 @@
+{
+  "name": "theophrastus",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Node test tools for Theophrastus's cljc namespaces. The library itself has no npm dependencies.",
+  "devDependencies": {
+    "shadow-cljs": "^3.5.8"
+  }
+}
