@@ -62,11 +62,26 @@
   [x prefixes]
   (as-iri x prefixes))
 
+(def namespace-iris
+  "The namespace IRI of each prefix of `prefixes`, without angle brackets,
+  by the name of the prefix. It's memoized, since a db looks up every
+  keyword with the same prefixes."
+  (memoize
+    (fn [prefixes]
+      (into {}
+            (keep (fn [[prefix ns-iri]]
+                    ;; a keyword here would look itself up again
+                    (when-let [ns-iri (and (simple-keyword? prefix)
+                                           (not (keyword? ns-iri))
+                                           (iri ns-iri prefixes))]
+                      [(name prefix) ns-iri])))
+            prefixes))))
+
 (extend-protocol AsIri
   #?(:clj clojure.lang.Keyword :cljs cljs.core/Keyword)
   (as-iri [k prefixes]
-    (when-let [ns-iri (some->> (namespace k) keyword (get prefixes))]
-      (some-> (iri ns-iri prefixes) (str (name k)))))
+    (when-let [ns-iri (get (namespace-iris prefixes) (namespace k))]
+      (str ns-iri (name k))))
 
   #?(:clj String :cljs string)
   (as-iri [s _]
@@ -301,14 +316,17 @@
   (let [special {"INF" ##Inf "+INF" ##Inf "-INF" ##-Inf "NaN" ##NaN}
         integer (fn [[lo hi]]
                   (fn [s]
-                    (let [n #?(:clj (bigint s) :cljs (js/Number s))]
+                    ;; only an integer past a long needs the much slower
+                    ;; bigint
+                    (let [n #?(:clj  (try
+                                       (Long/parseLong s)
+                                       (catch NumberFormatException _
+                                         (bigint s)))
+                               :cljs (js/Number s))]
                       (when (and (or (nil? lo) (<= lo n))
                                  (or (nil? hi) (<= n hi))
                                  #?(:cljs (js/Number.isSafeInteger n)))
-                        #?(:clj  (if (<= Long/MIN_VALUE n Long/MAX_VALUE)
-                                   (long n)
-                                   n)
-                           :cljs n)))))]
+                        n))))]
     (merge
       (update-vals integer-bounds integer)
       {"boolean" #(contains? #{"true" "1"} %)

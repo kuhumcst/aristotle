@@ -20,7 +20,7 @@
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.reasoner ReasonerRegistry]
            [org.apache.jena.riot RDFDataMgr]
-           [org.apache.jena.tdb2 TDB2Factory]
+           [org.apache.jena.tdb2 TDB2 TDB2Factory]
            [org.apache.jena.tdb2.sys TDBInternal]))
 
 (def prefixes
@@ -496,6 +496,21 @@
           "unlimited recursion")
       (is (= :ex/luke (-> (jim '...) :ex/friends :ex/friends :ex/friends))
           "a recursion stops at a subject already pulled"))))
+
+(deftest union-default-graph
+  (let [dataset (TDB2Factory/createDataset)
+        db      (theo/db dataset {:prefixes prefixes})
+        name-of #(theo/q db "SELECT ?n WHERE { ex:luke ex:name ?n }")]
+    (theo/transact! (theo/named-graph db :ex/g) people)
+    (is (empty? (name-of)))
+    (is (nil? (theo/entity db :ex/luke)) "only the default graph")
+    (.set (.getContext ^Dataset dataset) TDB2/symUnionDefaultGraph true)
+    (is (= [{'?n "Luke"}] (name-of)))
+    (is (= "Luke" (:ex/name (theo/entity db :ex/luke)))
+        "the union of the named graphs, as a query has it")
+    (is (= {:rdf/about :ex/luke :ex/_friends :ex/thom}
+           (theo/pull db [:ex/_friends] :ex/luke))
+        "the links to a subject too")))
 
 (deftest map-form
   (let [m  (ModelFactory/createDefaultModel)

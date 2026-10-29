@@ -87,16 +87,23 @@
   "The Binding `b` as a map of variable to value, as theophrastus/q returns
   it, with IRIs under `prefixes` as keywords."
   [^Binding b prefixes]
-  (into {}
-        (map (fn [^Var v]
-               [(symbol (str "?" (.getVarName v)))
-                (convert/data (.get b v) prefixes)]))
-        (iterator-seq (.vars b))))
+  ;; a loop over the Iterator, since iterator-seq allocates a chunk of 32
+  ;; for each row
+  (let [vars (.vars b)]
+    (loop [m (transient {})]
+      (if (.hasNext vars)
+        (let [^Var v (.next vars)]
+          (recur (assoc! m
+                         (symbol (str "?" (.getVarName v)))
+                         (convert/data (.get b v) prefixes))))
+        (persistent! m)))))
 
 (defn reduce-rows
   "Reduce the `rows`, a RowSet, with `f` from `init`, as reduce does, one
   row at a time, with values under `prefixes`."
   [f init ^RowSet rows prefixes]
+  ;; a loop rather than a reduce over iterator-seq, which reads rows 32 at a
+  ;; time, past the point where a reduction stops
   (loop [acc init]
     (if (.hasNext rows)
       (let [acc (f acc (row (.next rows) prefixes))]

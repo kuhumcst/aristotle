@@ -60,9 +60,14 @@
   it starts with leaves a name, without a slash, or else in angle brackets.
   A keyword with an empty name, e.g. :owl/, can't be read back."
   [^String s prefixes]
+  ;; reduce and nth rather than some and second, which allocate a seq for
+  ;; each namespace, since this runs for every IRI that a query returns
   (or (when-let [[prefix ^String ns-iri]
-                 (some #(when (.startsWith s ^String (second %)) %)
-                       (namespace-index prefixes))]
+                 (reduce (fn [_ entry]
+                           (when (.startsWith s ^String (nth entry 1))
+                             (reduced entry)))
+                         nil
+                         (namespace-index prefixes))]
         (let [local (subs s (count ns-iri))]
           (when-not (or (= "" local) (str/includes? local "/"))
             (keyword (name prefix) local))))
@@ -215,25 +220,53 @@
     (node about prefixes)
     (NodeFactory/createBlankNode)))
 
-(defn- map->triples
-  "The Jena triples of the properties of the map `m`, whose subject is the
-  Jena node `s`, with keywords under `prefixes`."
-  [m s prefixes]
-  (vec (for [[p v] (dissoc m :rdf/about)
-             :let  [reverse (reverse-property p)
-                    pred    (node (or reverse p) prefixes)]
-             x     (if (or (set? v) (sequential? v)) v [v])
-             :when (some? x)
-             :let  [o (if (map? x)
-                        (subject-node x prefixes)
-                        (node x prefixes))]
-             t     (cons (if reverse
-                           (Triple/create o pred s)
-                           (Triple/create s pred o))
-                         (when (map? x)
-                           (map->triples x o prefixes)))]
-         t)))
+(defn- conj-map-triples!
+  "The transient `acc` with the Jena triples of the properties of the map
+  `m`, whose subject is the Jena node `s`, with keywords under `prefixes`."
+  [acc m s prefixes]
+  (reduce-kv
+    (fn [acc p v]
+      (if (= :rdf/about p)
+        acc
+        (let [reverse (reverse-property p)
+              pred    (node (or reverse p) prefixes)]
+          (reduce (fn [acc x]
+                    (if (nil? x)
+                      acc
+                      (let [o (if (map? x)
+                                (subject-node x prefixes)
+                                (node x prefixes))]
+                        (cond-> (conj! acc (if reverse
+                                             (Triple/create o pred s)
+                                             (Triple/create s pred o)))
+                          (map? x) (conj-map-triples! x o prefixes)))))
+                  acc
+                  (if (or (set? v) (sequential? v)) v [v])))))
+    acc
+    m))
 
+(defn- conj-triples!
+  "The transient `acc` with the Jena triples of `tx-data`, as triples
+  returns them."
+  [acc tx-data prefixes]
+  (cond
+    (map? tx-data)
+    (conj-map-triples! acc tx-data (subject-node tx-data prefixes) prefixes)
+
+    (triple? tx-data)
+    (let [[s p o] tx-data]
+      (conj! acc (Triple/create (node s prefixes)
+                                (node p prefixes)
+                                (node o prefixes))))
+
+    (coll? tx-data)
+    (reduce #(conj-triples! %1 %2 prefixes) acc tx-data)
+
+    :else
+    (throw (ex-info (str "Not a triple or a map: " (pr-str tx-data))
+                    {:tx-data tx-data}))))
+
+;; one transient vector for all of them, since tx-data can have millions
 (defn triples
   "The Jena triples of `tx-data`, as theophrastus/transact! takes it: [s p o]
   triples of Clojure values, maps of a subject's properties, and colls of
@@ -243,20 +276,7 @@
   nested map is a subject of its own, and a predicate such as :ex/_knows
   links the other way."
   [tx-data prefixes]
-  (cond
-    (map? tx-data)
-    (map->triples tx-data (subject-node tx-data prefixes) prefixes)
-
-    (triple? tx-data)
-    (let [[s p o] (map #(node % prefixes) tx-data)]
-      [(Triple/create s p o)])
-
-    (coll? tx-data)
-    (into [] (mapcat #(triples % prefixes)) tx-data)
-
-    :else
-    (throw (ex-info (str "Not a triple or a map: " (pr-str tx-data))
-                    {:tx-data tx-data}))))
+  (persistent! (conj-triples! (transient []) tx-data prefixes)))
 
 (defn pattern->nodes
   "The Jena nodes of the [s p o] `pattern` of Clojure values, as

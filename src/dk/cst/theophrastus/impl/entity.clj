@@ -1,7 +1,7 @@
 (ns dk.cst.theophrastus.impl.entity
-  "The maps that entity and pull return, built from rows of predicates and
-  objects, and from functions that look up a subject. A property in them
-  has one value, or a set of values when it has several."
+  "The maps that entity and pull return, built from the predicates and
+  objects of a subject, and from functions that look up a subject. A
+  property in them has one value, or a set of values when it has several."
   (:require [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.term :as term]))
 
@@ -21,26 +21,34 @@
     (f v)))
 
 (defn property-map
-  "The map of the predicate of each of the `rows` to its object, or to a set
-  of its objects when it has several."
-  [rows]
-  (update-vals (group-by '?p rows)
-               #(property-value (map '?o %))))
+  "The map of the predicate of each of the [p o] `pairs` to its object, or
+  to a set of its objects when it has several."
+  [pairs]
+  (persistent!
+    (reduce (fn [m [p o]]
+              (let [v (get m p ::none)]
+                (assoc! m p (cond
+                              (= ::none v) o
+                              (set? v)     (conj v o)
+                              (= v o)      v
+                              :else        #{v o}))))
+            (transient {})
+            pairs)))
 
 ;; Concise Bounded Description (W3C Member Submission, 2005), section 2,
 ;; without the reifications of its third step
 (defn describe
-  "The property map of the `rows` of a subject, with each blank node among
-  the values replaced by the property map of its own rows, which `rows-of`
-  returns, and its :rdf/about, unless it's one of the subjects `seen` on the
-  way there."
-  [rows-of rows seen]
+  "The property map of the [p o] `pairs` of a subject, with each blank node
+  among the values replaced by the property map of its own pairs, which
+  `pairs-of` returns, and its :rdf/about, unless it's one of the subjects
+  `seen` on the way there."
+  [pairs-of pairs seen]
   (let [expand (fn [x]
                  (if (and (term/blank-node? x) (not (seen x)))
-                   (assoc (describe rows-of (rows-of x) (conj seen x))
+                   (assoc (describe pairs-of (pairs-of x) (conj seen x))
                      :rdf/about x)
                    x))]
-    (update-vals (property-map rows) #(map-value expand %))))
+    (update-vals (property-map pairs) #(map-value expand %))))
 
 (defn subject?
   "Whether the value `x` can be a subject: an IRI, a blank node, or the map
@@ -57,6 +65,7 @@
   "The map of each predicate in the pull `pattern` to what to pull from its
   values, or nil to keep them as they are. '* stands for every predicate."
   [pattern]
+  ;; the maps go last, so that {:ex/p [...]} wins over a plain :ex/p
   (merge (zipmap (remove map? pattern) (repeat nil))
          (apply merge (filter map? pattern))))
 
@@ -93,6 +102,8 @@
          pull-v   (fn [spec v]
                     (or (when (subject? v)
                           (cond
+                            ;; a pattern of its own is a new pull, with a
+                            ;; depth and subjects seen of its own
                             (vector? spec)
                             (pull lookup spec v 0 #{})
 

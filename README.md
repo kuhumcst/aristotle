@@ -328,10 +328,10 @@ number in place of `'...` limits the depth. A reverse predicate such as
 Transactions and TDB2
 ---------------------
 
-The functions that end in `!` each write in one transaction, and `theo/q`
-and `theo/entity` each read in one. To run several functions in one
-transaction, use the macros of the txn namespace with the Dataset or Model
-of the db, which `theo/store` returns:
+The functions that end in `!` each write in one transaction, and `theo/q`,
+`theo/entity` and `theo/pull` each read in one. To run several functions
+in one transaction, use the macros of the txn namespace with the Dataset or
+Model of the db, which `theo/store` returns:
 
 ```clojure
 (require '[dk.cst.theophrastus.txn :as txn])

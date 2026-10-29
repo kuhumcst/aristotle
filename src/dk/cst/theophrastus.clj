@@ -10,14 +10,15 @@
             [clojure.java.io :as io])
   (:import [clojure.lang IReduceInit]
            [java.io Writer]
-           [org.apache.jena.graph Graph GraphUtil]
-           [org.apache.jena.query Dataset DatasetFactory Query QueryFactory
+           [org.apache.jena.graph Graph GraphUtil Node Triple]
+           [org.apache.jena.query ARQ Dataset DatasetFactory Query QueryFactory
             Syntax]
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.reasoner BaseInfGraph]
            [org.apache.jena.riot RDFDataMgr]
            [org.apache.jena.shared PrefixMapping]
            [org.apache.jena.sparql.core DatasetGraph]
+           [org.apache.jena.tdb2 DatabaseMgr TDB2]
            [org.apache.jena.update UpdateFactory UpdateRequest]))
 
 (defrecord Db [model dataset prefixes])
@@ -37,6 +38,7 @@
         ^PrefixMapping pm (if (instance? Dataset x)
                             (.getPrefixMapping ^Dataset x)
                             x)]
+    ;; read first, since a write transaction on TDB2 is a commit to disk
     (when (not= mapping
                 (txn/calculate-read x #(into {} (.getNsPrefixMap pm))))
       (txn/calculate-write x #(-> pm
@@ -250,6 +252,7 @@
      (QueryFactory/parse q s nil Syntax/defaultQuerySyntax)
      q)))
 
+;; for q, whose parameter db hides the function db
 (defn- graph->db
   "A db of the in-memory Graph `g` that a query returned, with `prefixes`."
   [g prefixes]
@@ -287,8 +290,11 @@
        (store db)
        #(with-open [qe (.build builder)]
           (cond
-            (.isSelectType bound)    (sparql/reduce-rows conj [] (.select qe)
-                                                         prefixes)
+            (.isSelectType bound)    (persistent!
+                                       (sparql/reduce-rows conj!
+                                                           (transient [])
+                                                           (.select qe)
+                                                           prefixes))
             (.isAskType bound)       (.ask qe)
             (.isConstructType bound) (graph->db (.construct qe) prefixes)
             (.isDescribeType bound)  (graph->db (.describe qe) prefixes)
@@ -352,29 +358,56 @@
      (txn/calculate-write (store db) #(.execute (.build builder)))
      db)))
 
-(def properties-query
-  "The query of the predicates and objects of ?s."
-  (query "SELECT ?p ?o WHERE { ?s ?p ?o }"))
+;; as TDB2's QueryEngineTDB checks it, with the context of the dataset over
+;; the global one
+(defn- union-default-graph?
+  "Whether a query on the DatasetGraph `dsg` matches the union of its named
+  graphs in place of its default graph, as TDB2 does when its context says
+  so."
+  [^DatasetGraph dsg]
+  (and (DatabaseMgr/isTDB2 dsg)
+       (let [cxt (.getContext dsg)
+             on? (fn [sym]
+                   (if (and cxt (.isDefined cxt sym))
+                     (.isTrue cxt sym)
+                     (.isTrue (ARQ/getContext) sym)))]
+         (or (on? TDB2/symUnionDefaultGraph1)
+             (on? TDB2/symUnionDefaultGraph2)))))
 
-(def subjects-query
-  "The query of the subjects that link to ?o by the predicate ?p."
-  (query "SELECT ?s WHERE { ?s ?p ?o }"))
+;; entity and pull read with Graph.find, which is many times faster than a
+;; SPARQL query for each subject, so they have to read the graph that q
+;; reads, and for TDB2 that can be the union graph rather than the default
+(defn- query-graph
+  "The Graph whose triples a query on `db` matches: the graph of its Model,
+  or else the default graph of its Dataset, or the union of its named graphs
+  when TDB2 makes that the default."
+  ^Graph [{:keys [^Model model ^Dataset dataset]}]
+  (if dataset
+    (let [dsg (.asDatasetGraph dataset)]
+      (if (union-default-graph? dsg)
+        (.getUnionGraph dsg)
+        (.getDefaultGraph dsg)))
+    (.getGraph model)))
+
+(defn- property-pairs
+  "The predicate and object of each of the Jena `triples`, as q returns
+  values, with IRIs under `prefixes` as keywords."
+  [triples prefixes]
+  (into []
+        (map (fn [^Triple t]
+               [(convert/data (.getPredicate t) prefixes)
+                (convert/data (.getObject t) prefixes)]))
+        triples))
 
 (defn- inferred
-  "The property map of the `rows` of `subject` in `db`, a db of an inference
-  Model, that are in neither its raw graph nor its schema."
-  [{:keys [^Model model prefixes] :as db} subject rows]
+  "The property map of the Jena `triples` of a subject in `db`, a db of an
+  inference Model, that are in neither its raw graph nor its schema."
+  [{:keys [^Model model prefixes] :as db} triples]
   (let [^BaseInfGraph g (.getGraph model)
-        rows-in         #(q (->Db (ModelFactory/createModelForGraph %)
-                                  nil
-                                  prefixes)
-                            properties-query
-                            {'?s subject})
-        asserted        (into #{}
-                              (mapcat rows-in)
-                              (keep identity [(.getRawGraph g)
-                                              (.getSchemaGraph g)]))]
-    (entity/property-map (remove asserted rows))))
+        asserted        (keep identity [(.getRawGraph g) (.getSchemaGraph g)])
+        asserted?       (fn [t]
+                          (some #(.contains ^Graph % ^Triple t) asserted))]
+    (entity/property-map (property-pairs (remove asserted? triples) prefixes))))
 
 ;; TODO: an option for one value or a set by a schema, as in Datomic, e.g.
 ;; SHACL's sh:maxCount 1 or owl:FunctionalProperty, instead of by the data
@@ -388,22 +421,34 @@
   can go back into transact! as it is. For a db of an inference Model, the
   metadata of the entity has the :inferred properties: those in neither the
   raw graph nor the schema. The entity is read in one read transaction."
-  [{:keys [^Model model] :as db} subject]
-  (let [rows-of #(q db properties-query {'?s %})]
-    (txn/calculate-read
-      (store db)
-      #(when-let [rows (not-empty (rows-of subject))]
-         (cond-> (assoc (entity/describe rows-of rows #{subject})
+  [{:keys [^Model model prefixes] :as db} subject]
+  (txn/calculate-read
+    (store db)
+    #(let [g        (query-graph db)
+           triples  (fn [s]
+                      (.toList (.find g (convert/node s prefixes)
+                                      Node/ANY
+                                      Node/ANY)))
+           pairs-of (fn [s] (property-pairs (triples s) prefixes))]
+       (when-let [ts (not-empty (triples subject))]
+         (cond-> (assoc (entity/describe pairs-of
+                                         (property-pairs ts prefixes)
+                                         #{subject})
                    :rdf/about subject)
            (and model (instance? BaseInfGraph (.getGraph model)))
-           (with-meta {:inferred (inferred db subject rows)}))))))
+           (with-meta {:inferred (inferred db ts)}))))))
 
 (defn- links-to
-  "The subjects that link to `subject` in `db` by the predicate `p`, as one
-  value or a set of them, or nil when there are none."
-  [db p subject]
+  "The subjects that link to `subject` in the Graph `g` by the predicate
+  `p`, as one value or a set of them, or nil when there are none, with
+  values under `prefixes`."
+  [^Graph g p subject prefixes]
   (entity/property-value
-    (map '?s (q db subjects-query {'?p p '?o subject}))))
+    (map #(convert/data (.getSubject ^Triple %) prefixes)
+         (.toList (.find g
+                         Node/ANY
+                         (convert/node p prefixes)
+                         (convert/node subject prefixes))))))
 
 (defn pull
   "The properties of `subject` in `db` that the `pattern` selects, in the
@@ -420,9 +465,14 @@
     depth, or a number for this pattern again at most that many times.
 
   A predicate has its value, or a set of values when it has several. A
-  recursion stops at a subject that it has already pulled on its way."
-  [db pattern subject]
-  (entity/pull {:entity   #(entity db %)
-                :links-to #(links-to db %1 %2)}
-               pattern
-               subject))
+  recursion stops at a subject that it has already pulled on its way. The
+  pull is read in one read transaction."
+  [{:keys [prefixes] :as db} pattern subject]
+  (txn/calculate-read
+    (store db)
+    #(let [g (query-graph db)]
+       ;; as functions, since impl.entity can't require this namespace
+       (entity/pull {:entity   (fn [s] (entity db s))
+                     :links-to (fn [p s] (links-to g p s prefixes))}
+                    pattern
+                    subject))))
