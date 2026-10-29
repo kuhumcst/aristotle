@@ -161,7 +161,9 @@ it has none:
 - a predicate such as `:ex/_knows` links the other way.
 
 The function converts all the data before it writes, so an error leaves
-the db as it was. A Jena Graph or Model works as data too.
+the db as it was. A Jena Graph or Model works as data too. To turn the data
+into Jena triples without writing it, e.g. for Jena's own API, use
+`convert/triples`.
 
 Remove triples with `theo/retract!`, where `_` in a pattern matches
 anything, and run a SPARQL Update with `theo/update!`:
@@ -171,6 +173,9 @@ anything, and run a SPARQL Update with `theo/update!`:
 
 (theo/update! db "DELETE WHERE { ?p ex:age ?age }" {'?p :ex/bob})
 ```
+
+To parse an update once, e.g. one you run often, use `theo/update-request`
+with the prefixes and pass the result to `theo/update!`.
 
 Read RDF files with `theo/read!` and write one with `theo/write`. The file
 name gives the syntax, e.g. Turtle for .ttl:
@@ -256,7 +261,10 @@ and `count` don't work on it.
 
 Where you run a query with Jena's own API, e.g. to keep its ResultSet,
 `convert/data` turns each Jena node in the results into the value that
-`theo/q` would return.
+`theo/q` would return. For this, the sparql namespace has the parts of
+`theo/q`: `sparql/bind` adds bindings to a Query,
+`sparql/query-exec-builder` returns a QueryExecBuilder for a db, and
+`sparql/row` turns a row of a RowSet into a map.
 
 To write queries as data, add [Flint](https://github.com/yetanalytics/flint)
 to your deps and pass the string it formats to `theo/q`:
@@ -322,12 +330,13 @@ Transactions and TDB2
 
 The functions that end in `!` each write in one transaction, and `theo/q`
 and `theo/entity` each read in one. To run several functions in one
-transaction, use the macros of the txn namespace:
+transaction, use the macros of the txn namespace with the Dataset or Model
+of the db, which `theo/store` returns:
 
 ```clojure
 (require '[dk.cst.theophrastus.txn :as txn])
 
-(txn/with-write-transaction (:dataset db)
+(txn/with-write-transaction (theo/store db)
   (theo/retract! db [[:ex/alice :rdfs/label '_]])
   (theo/transact! db [[:ex/alice :rdfs/label "Alice Smith"]]))
 ```
@@ -337,7 +346,7 @@ writes some of the time, `txn/with-transaction` runs it in a transaction
 that starts as a read and becomes a write at the first write:
 
 ```clojure
-(txn/with-transaction (:dataset db)
+(txn/with-transaction (theo/store db)
   (when-not (theo/entity db :ex/bob)
     (theo/transact! db [[:ex/bob :rdfs/label "Bob"]])))
 ```

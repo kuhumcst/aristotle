@@ -1,6 +1,7 @@
 (ns dk.cst.theophrastus.convert
   "Jena nodes to Clojure values and back, with the RDF terms of the term
-  namespace."
+  namespace, and the Jena triples and patterns of the data that
+  theophrastus/transact! and theophrastus/retract! take."
   (:require [dk.cst.theophrastus.term :as term]
             [clojure.string :as str]
             [dk.simongray.langtag :as langtag])
@@ -10,26 +11,13 @@
            [java.util Map]
            [org.apache.jena.datatypes TypeMapper]
            [org.apache.jena.datatypes.xsd XSDDatatype]
-           [org.apache.jena.graph Node NodeFactory]
+           [org.apache.jena.graph Node NodeFactory Triple]
            [org.apache.jena.shared PrefixMapping PrefixMapping$Factory]
            [org.apache.jena.sparql.core Var]
            [org.apache.jena.sys JenaSystem]))
 
 ;; Jena's TypeMapper is nil until Jena has initialised itself
 (JenaSystem/init)
-
-(def namespace-index
-  "The namespaces of `prefixes`, longest first, each as [prefix namespace]
-  without angle brackets. It's memoized, since a db reads every IRI with
-  the same prefixes."
-  (memoize
-    (fn [prefixes]
-      (->> (for [[prefix ns-iri] prefixes
-                 :let [iri (term/iri ns-iri prefixes)]
-                 :when iri]
-             [prefix iri])
-           (sort-by (comp - count second))
-           (vec)))))
 
 ;; named after PrefixMapping's getNsPrefixMap, which returns this map
 (defn ns-prefix-map
@@ -53,6 +41,19 @@
   "The key under which the context of a query holds the prefixes of its db,
   so that a SPARQL function can convert values as the query does."
   (org.apache.jena.sparql.util.Symbol/create "dk.cst.theophrastus/prefixes"))
+
+(def namespace-index
+  "The namespaces of `prefixes`, longest first, each as [prefix namespace]
+  without angle brackets. It's memoized, since a db reads every IRI with
+  the same prefixes."
+  (memoize
+    (fn [prefixes]
+      (->> (for [[prefix ns-iri] prefixes
+                 :let [iri (term/iri ns-iri prefixes)]
+                 :when iri]
+             [prefix iri])
+           (sort-by (comp - count second))
+           (vec)))))
 
 (defn iri->data
   "The IRI `s` as a keyword, when the longest namespace of `prefixes` that
@@ -187,3 +188,82 @@
   nil
   (as-node [_ _]
     (throw (ex-info "No RDF term for nil" {}))))
+
+;; RDF Schema 1.1, section 5.1.5: rdf:_1, rdf:_2 and so on are the
+;; container membership properties, not reversed ones
+(defn reverse-property
+  "The predicate that the keyword `p` names the other way round, e.g.
+  :ex/knows for :ex/_knows, or nil when it doesn't."
+  [p]
+  (when (keyword? p)
+    (let [n (name p)]
+      (when (and (str/starts-with? n "_")
+                 (not (re-matches #"_[1-9][0-9]*" n)))
+        (keyword (namespace p) (subs n 1))))))
+
+(defn triple?
+  "Whether `x` is an [s p o] triple of Clojure values, rather than a coll of
+  them."
+  [x]
+  (and (vector? x) (= 3 (count x)) (not-any? coll? x)))
+
+(defn- subject-node
+  "The Jena node of the subject of the map `m`: its :rdf/about, or else a
+  new blank node."
+  ^Node [m prefixes]
+  (if-let [about (:rdf/about m)]
+    (node about prefixes)
+    (NodeFactory/createBlankNode)))
+
+(defn- map->triples
+  "The Jena triples of the properties of the map `m`, whose subject is the
+  Jena node `s`, with keywords under `prefixes`."
+  [m s prefixes]
+  (vec (for [[p v] (dissoc m :rdf/about)
+             :let  [reverse (reverse-property p)
+                    pred    (node (or reverse p) prefixes)]
+             x     (if (or (set? v) (sequential? v)) v [v])
+             :when (some? x)
+             :let  [o (if (map? x)
+                        (subject-node x prefixes)
+                        (node x prefixes))]
+             t     (cons (if reverse
+                           (Triple/create o pred s)
+                           (Triple/create s pred o))
+                         (when (map? x)
+                           (map->triples x o prefixes)))]
+         t)))
+
+(defn triples
+  "The Jena triples of `tx-data`, as theophrastus/transact! takes it: [s p o]
+  triples of Clojure values, maps of a subject's properties, and colls of
+  these, with keywords under `prefixes`.
+
+  A map has the properties of its :rdf/about, or of a new blank node. A
+  nested map is a subject of its own, and a predicate such as :ex/_knows
+  links the other way."
+  [tx-data prefixes]
+  (cond
+    (map? tx-data)
+    (map->triples tx-data (subject-node tx-data prefixes) prefixes)
+
+    (triple? tx-data)
+    (let [[s p o] (map #(node % prefixes) tx-data)]
+      [(Triple/create s p o)])
+
+    (coll? tx-data)
+    (into [] (mapcat #(triples % prefixes)) tx-data)
+
+    :else
+    (throw (ex-info (str "Not a triple or a map: " (pr-str tx-data))
+                    {:tx-data tx-data}))))
+
+(defn pattern->nodes
+  "The Jena nodes of the [s p o] `pattern` of Clojure values, as
+  theophrastus/retract! takes it, with Node/ANY for _, which matches
+  anything."
+  [pattern prefixes]
+  (if (triple? pattern)
+    (mapv #(if (= '_ %) Node/ANY (node % prefixes)) pattern)
+    (throw (ex-info (str "Not a pattern: " (pr-str pattern))
+                    {:pattern pattern}))))

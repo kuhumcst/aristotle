@@ -82,6 +82,7 @@
   (is (= term/default-prefixes (:prefixes (theo/db))))
   (let [db (theo/db {:prefixes prefixes})]
     (is (instance? Dataset (:dataset db)))
+    (is (identical? (:dataset db) (theo/store db)))
     (theo/transact! db [[:ex/s :ex/p "o"]])
     (is (thrown? ExceptionInfo
                  (theo/transact! db [[:ex/s :ex/p "q"]
@@ -89,6 +90,7 @@
     (is (= 1 (graph-size db)) "a failed write is undone"))
   (let [db (theo/db {:prefixes prefixes :transactional? false})]
     (is (instance? Model (:model db)) "a plain Model")
+    (is (identical? (:model db) (theo/store db)))
     (theo/transact! db [[:ex/s :ex/p "o"]])
     (is (= [{'?o "o"}] (theo/q db "SELECT ?o WHERE { ?s ?p ?o }")))
     (is (thrown-with-msg? ExceptionInfo #"A Model has no named graphs"
@@ -318,7 +320,7 @@
 (deftest reducible
   (doseq [db (label-dbs)
           :let [labels "SELECT * WHERE { ?s rdfs:label ?l }"
-                store  (or (:dataset db) (:model db))]]
+                store  (theo/store db)]]
     (is (= (set (theo/q db labels)) (into #{} (theo/reducible db labels)))
         "the rows of q")
     (is (= (theo/q db labels {'?s :ex/b})
@@ -643,6 +645,9 @@
           :let [name-of #(:ex/name (theo/entity db %))]]
     (is (identical? db (theo/update! db "INSERT DATA { ex:x ex:name \"X\" }")))
     (is (= "X" (name-of :ex/x)) "the prefixes of the db need no PREFIX line")
+    (theo/update! db (theo/update-request "INSERT DATA { ex:y ex:name \"Y\" }"
+                                          prefixes))
+    (is (= "Y" (name-of :ex/y)) "an UpdateRequest")
     (theo/update! db "DELETE { ?s ex:name ?n } INSERT { ?s ex:name ?u }
                      WHERE { ?s ex:name ?n BIND (UCASE(?n) AS ?u) }"
                  {'?s :ex/luke})

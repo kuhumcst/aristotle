@@ -1,29 +1,23 @@
 (ns dk.cst.theophrastus
-  "A db of a Jena Model or Dataset, in the style of Datomic: db and its views
-  default-graph, named-graph and union-graph, q, reducible, entity, pull,
-  transact!, retract!, update!, read! and write. The functions that change
-  a db end in !."
+  "A db of a Jena Model or Dataset, in the style of Datomic. The functions
+  that change a db end in !."
   (:require [dk.cst.theophrastus.convert :as convert]
+            [dk.cst.theophrastus.impl.entity :as entity]
+            [dk.cst.theophrastus.impl.files :as files]
+            [dk.cst.theophrastus.sparql :as sparql]
             [dk.cst.theophrastus.txn :as txn]
             [dk.cst.theophrastus.term :as term]
-            [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.java.io :as io])
   (:import [clojure.lang IReduceInit]
            [java.io Writer]
-           [java.util.concurrent TimeUnit]
-           [org.apache.jena.graph Graph GraphMemFactory GraphUtil Node
-            NodeFactory Triple]
+           [org.apache.jena.graph Graph GraphUtil]
            [org.apache.jena.query Dataset DatasetFactory Query QueryFactory
             Syntax]
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.reasoner BaseInfGraph]
-           [org.apache.jena.riot Lang RDFDataMgr RDFLanguages RDFParser]
+           [org.apache.jena.riot RDFDataMgr]
            [org.apache.jena.shared PrefixMapping]
-           [org.apache.jena.sparql.core DatasetGraph Var]
-           [org.apache.jena.sparql.engine.binding Binding BindingFactory]
-           [org.apache.jena.sparql.exec QueryExec QueryExecBuilder RowSet
-            UpdateExec UpdateExecBuilder]
-           [org.apache.jena.sparql.syntax ElementData ElementGroup]
+           [org.apache.jena.sparql.core DatasetGraph]
            [org.apache.jena.update UpdateFactory UpdateRequest]))
 
 (defrecord Db [model dataset prefixes])
@@ -34,6 +28,20 @@
   (.write writer (str "#object[" (.getName Db) " \""
                       (if (:dataset db) "a Dataset" "a Model")
                       " with " (count (:prefixes db)) " prefixes\"]")))
+
+(defn- set-prefixes!
+  "Replace the prefixes of the Model or Dataset `x` with the `prefixes`,
+  unless it has them already."
+  [x prefixes]
+  (let [mapping           (convert/ns-prefix-map prefixes)
+        ^PrefixMapping pm (if (instance? Dataset x)
+                            (.getPrefixMapping ^Dataset x)
+                            x)]
+    (when (not= mapping
+                (txn/calculate-read x #(into {} (.getNsPrefixMap pm))))
+      (txn/calculate-write x #(-> pm
+                                  (.clearNsPrefixMap)
+                                  (.setNsPrefixes ^java.util.Map mapping))))))
 
 (defn db
   "The db of `x`, a Jena Model, Dataset, Graph or DatasetGraph, with these
@@ -71,22 +79,28 @@
      (instance? DatasetGraph x)
      (db (DatasetFactory/wrap ^DatasetGraph x) opts)
 
-     (not (or (instance? Dataset x) (instance? Model x)))
-     (throw (ex-info (str "Not a Model, Dataset or Graph: " x) {:x x}))
+     (instance? Dataset x)
+     (do (set-prefixes! x prefixes)
+         (->Db nil x prefixes))
+
+     (instance? Model x)
+     (do (set-prefixes! x prefixes)
+         (->Db x nil prefixes))
 
      :else
-     (let [mapping           (convert/ns-prefix-map prefixes)
-           ^PrefixMapping pm (if (instance? Dataset x)
-                               (.getPrefixMapping ^Dataset x)
-                               x)]
-       (when (not= mapping
-                   (txn/calculate-read x #(into {} (.getNsPrefixMap pm))))
-         (txn/calculate-write x #(-> pm
-                                     (.clearNsPrefixMap)
-                                     (.setNsPrefixes ^java.util.Map mapping))))
-       (if (instance? Dataset x)
-         (->Db nil x prefixes)
-         (->Db x nil prefixes))))))
+     (throw (ex-info (str "Not a Model, Dataset or Graph: " x) {:x x})))))
+
+(defn store
+  "The Jena store of `db`: its Dataset, or else its Model. The functions of
+  the txn namespace take it."
+  [{:keys [model dataset] :as db}]
+  (or dataset model))
+
+(defn jena-graph
+  "The Jena Graph of `db`: the graph of its Model, or the default graph of
+  its Dataset."
+  ^Graph [{:keys [^Model model ^Dataset dataset] :as db}]
+  (.getGraph (or model (.getDefaultModel dataset))))
 
 ;; as in Jena's DatasetGraph: getDefaultGraph, getGraph and getUnionGraph
 (defn default-graph
@@ -123,69 +137,6 @@
     (->Db (.getUnionModel ^Dataset dataset) nil prefixes)
     (throw (ex-info "A Model has no named graphs" {}))))
 
-;; RDF Schema 1.1, section 5.1.5: rdf:_1, rdf:_2 and so on are the
-;; container membership properties, not reversed ones
-(defn- reverse-property
-  "The predicate that the keyword `p` names the other way round, e.g.
-  :ex/knows for :ex/_knows, or nil when it doesn't."
-  [p]
-  (when (keyword? p)
-    (let [n (name p)]
-      (when (and (str/starts-with? n "_")
-                 (not (re-matches #"_[1-9][0-9]*" n)))
-        (keyword (namespace p) (subs n 1))))))
-
-(defn- map->triples
-  "The Jena node of the subject of the map `m`, its :rdf/about or a new
-  blank node, and the triples of its properties, with keywords under
-  `prefixes`. A nested map is a subject of its own, and a predicate such as
-  :ex/_knows links the other way."
-  [m prefixes]
-  (let [s (if-let [about (:rdf/about m)]
-            (convert/node about prefixes)
-            (NodeFactory/createBlankNode))]
-    [s (vec (for [[p v] (dissoc m :rdf/about)
-                  :let  [reverse (reverse-property p)
-                         pred    (convert/node (or reverse p) prefixes)]
-                  x     (if (or (set? v) (sequential? v)) v [v])
-                  :when (some? x)
-                  :let  [[o more] (if (map? x)
-                                    (map->triples x prefixes)
-                                    [(convert/node x prefixes) []])]
-                  t     (cons (if reverse
-                                (Triple/create o pred s)
-                                (Triple/create s pred o))
-                              more)]
-              t))]))
-
-(defn- ->triples
-  "The Jena triples of `tx-data`: [s p o] triples of Clojure values, maps of
-  a subject's properties, and colls of these, with keywords under
-  `prefixes`."
-  [tx-data prefixes]
-  (cond
-    (map? tx-data)
-    (second (map->triples tx-data prefixes))
-
-    (and (vector? tx-data) (= 3 (count tx-data)) (not-any? coll? tx-data))
-    (let [[s p o] tx-data]
-      [(Triple/create (convert/node s prefixes)
-                      (convert/node p prefixes)
-                      (convert/node o prefixes))])
-
-    (coll? tx-data)
-    (into [] (mapcat #(->triples % prefixes)) tx-data)
-
-    :else
-    (throw (ex-info (str "Not a triple or a map: " (pr-str tx-data))
-                    {:tx-data tx-data}))))
-
-(defn jena-graph
-  "The Jena Graph of `db`: the graph of its Model, or the default graph of
-  its Dataset."
-  ^Graph [{:keys [^Model model ^Dataset dataset] :as db}]
-  (.getGraph (or model (.getDefaultModel dataset))))
-
 (defn transact!
   "Add `tx-data` to `db` in one write transaction, and return `db`. A db of
   a Dataset gets it in its default graph, and a db of named-graph in that
@@ -202,12 +153,12 @@
 
   It's all converted first, so an error in it leaves the db as it was. A
   plain in-memory Model has no transactions (see the txn namespace)."
-  [{:keys [model dataset prefixes] :as db} tx-data]
+  [{:keys [prefixes] :as db} tx-data]
   (let [source (cond
                  (instance? Graph tx-data) tx-data
                  (instance? Model tx-data) (.getGraph ^Model tx-data)
-                 :else (->triples tx-data prefixes))]
-    (txn/calculate-write (or dataset model)
+                 :else (convert/triples tx-data prefixes))]
+    (txn/calculate-write (store db)
                          #(let [g (jena-graph db)]
                             (if (instance? Graph source)
                               (GraphUtil/addInto g ^Graph source)
@@ -220,19 +171,10 @@
   values in which _ matches anything, e.g. [:ex/luke :ex/age '_], and one
   may stand alone. They're all converted first, so an error in one leaves
   the db as it was."
-  [{:keys [model dataset prefixes] :as db} patterns]
-  (let [triple? #(and (vector? %) (= 3 (count %)) (not-any? coll? %))
-        nodes   (mapv (fn [pattern]
-                        (if (triple? pattern)
-                          (mapv #(if (= '_ %)
-                                   Node/ANY
-                                   (convert/node % prefixes))
-                                pattern)
-                          (throw (ex-info (str "Not a pattern: "
-                                               (pr-str pattern))
-                                          {:pattern pattern}))))
-                      (if (triple? patterns) [patterns] patterns))]
-    (txn/calculate-write (or dataset model)
+  [{:keys [prefixes] :as db} patterns]
+  (let [nodes (mapv #(convert/pattern->nodes % prefixes)
+                    (if (convert/triple? patterns) [patterns] patterns))]
+    (txn/calculate-write (store db)
                          #(let [g (jena-graph db)]
                             (doseq [[s p o] nodes]
                               (.remove g s p o))))
@@ -246,43 +188,18 @@
   syntax, e.g. Turtle for .ttl. Every file is parsed before anything is
   added, so a syntax error leaves the db as it was."
   [db source]
-  (let [g (GraphMemFactory/createDefaultGraph)]
-    (doseq [s (if (sequential? source) source [source])
-            :let [url  (io/as-url (if (string? s) (io/file s) s))
-                  lang (RDFLanguages/filenameToLang (str url))]]
-      (cond
-        (nil? lang)
-        (throw (ex-info (str "No RDF syntax for the name " url)
-                        {:source s}))
-
-        (RDFLanguages/isQuads lang)
-        (throw (ex-info (str "Not a syntax for one graph: " lang)
-                        {:source s})))
-      (with-open [in (io/input-stream url)]
-        (-> (RDFParser/create)
-            (.source in)
-            (.lang lang)
-            (.base (str url))
-            (.parse g))))
-    (transact! db g)))
+  (transact! db (files/parse (if (sequential? source) source [source]))))
 
 (defn write
   "Write `db` to the file `target`, a File or a path, and return `db`. A db
   of a Dataset writes its default graph. The file name gives the syntax,
   e.g. Turtle for .ttl, and the file has the prefixes of `db`."
-  [{:keys [model dataset] :as db} target]
+  [db target]
   (let [f    (io/file target)
-        lang (RDFLanguages/filenameToLang (str f))]
-    (cond
-      (nil? lang)
-      (throw (ex-info (str "No RDF syntax for the name " f) {:target target}))
-
-      (RDFLanguages/isQuads lang)
-      (throw (ex-info (str "Not a syntax for one graph: " lang)
-                      {:target target})))
-    (txn/calculate-read (or dataset model)
+        lang (files/syntax f)]
+    (txn/calculate-read (store db)
                         #(with-open [out (io/output-stream f)]
-                           (RDFDataMgr/write out (jena-graph db) ^Lang lang)))
+                           (RDFDataMgr/write out (jena-graph db) lang)))
     db))
 
 ;; RDF 1.1 Turtle, section 2.8: a collection is rdf:first, rdf:rest and
@@ -333,77 +250,6 @@
      (QueryFactory/parse q s nil Syntax/defaultQuerySyntax)
      q)))
 
-(defn- variable
-  "The Jena Var of the symbol `sym`, e.g. ?s."
-  ^Var [sym]
-  (if (and (symbol? sym) (= \? (first (name sym))))
-    (Var/alloc (subs (name sym) 1))
-    (throw (ex-info (str "Not a variable: " (pr-str sym)) {:variable sym}))))
-
-(defn- inline-data
-  "The VALUES block of the `rows` of values of the variables `vars`, with
-  nil for unbound."
-  ^ElementData [vars rows prefixes]
-  (let [data (ElementData.)]
-    (doseq [v vars]
-      (.add data (variable v)))
-    (doseq [row rows]
-      (let [b (BindingFactory/builder)]
-        (doseq [[v x] (map vector vars row)
-                :when (some? x)]
-          (.add b (variable v) (convert/node x prefixes)))
-        (.add data (.build b))))
-    data))
-
-;; SPARQL 1.1 Query Language, section 10.2: a VALUES block at the start of
-;; the WHERE clause joins with the rest, as initial bindings did, and keeps
-;; the bound variables in the results, which a substitution doesn't
-(defn- bind
-  "The copy of `query` with the `bindings` at the start of its WHERE clause,
-  with values under `prefixes`."
-  ^Query [^Query query bindings prefixes]
-  (let [q     (.cloneQuery query)
-        group (ElementGroup.)]
-    (doseq [[k v] bindings]
-      (.addElement group (cond
-                           (vector? k)
-                           (inline-data k v prefixes)
-
-                           (or (sequential? v) (set? v))
-                           (inline-data [k] (map vector v) prefixes)
-
-                           :else
-                           (inline-data [k] [[v]] prefixes))))
-    (when-let [pattern (.getQueryPattern q)]
-      (.addElement group pattern))
-    (.setQueryPattern q group)
-    q))
-
-(defn- row
-  "The Binding `b` as a map of variable to value, with IRIs under `prefixes`
-  as keywords."
-  [^Binding b prefixes]
-  (into {}
-        (map (fn [^Var v]
-               [(symbol (str "?" (.getVarName v)))
-                (convert/data (.get b v) prefixes)]))
-        (iterator-seq (.vars b))))
-
-(defn- exec-builder
-  "The Query of `x`, a SPARQL string or a Query, with the `bindings`, and
-  the QueryExecBuilder that runs it on `db` with the `opts` of q."
-  [{:keys [^Model model ^Dataset dataset prefixes]} x bindings
-   {:keys [timeout]}]
-  (let [parsed       (if (string? x) (query x prefixes) x)
-        ^Query bound (cond-> parsed
-                       (seq bindings) (bind bindings prefixes))
-        exec         (if dataset
-                       (QueryExec/dataset (.asDatasetGraph dataset))
-                       (QueryExec/graph (.getGraph model)))]
-    [bound (cond-> (-> ^QueryExecBuilder (.query exec bound)
-                       (.set convert/prefixes-symbol ^Object prefixes))
-             timeout (.timeout (long timeout) TimeUnit/MILLISECONDS))]))
-
 (defn- graph->db
   "A db of the in-memory Graph `g` that a query returned, with `prefixes`."
   [g prefixes]
@@ -432,15 +278,17 @@
    (q db x nil nil))
   ([db x bindings]
    (q db x bindings nil))
-  ([{:keys [^Model model ^Dataset dataset prefixes] :as db} x bindings opts]
-   (let [[^Query bound ^QueryExecBuilder builder]
-         (exec-builder db x bindings opts)]
+  ([{:keys [prefixes] :as db} x bindings opts]
+   (let [bound   (sparql/bind (if (string? x) (query x prefixes) x)
+                              bindings
+                              prefixes)
+         builder (sparql/query-exec-builder db bound opts)]
      (txn/calculate-read
-       (or dataset model)
+       (store db)
        #(with-open [qe (.build builder)]
           (cond
-            (.isSelectType bound)    (mapv (fn [b] (row b prefixes))
-                                           (iterator-seq (.select qe)))
+            (.isSelectType bound)    (sparql/reduce-rows conj [] (.select qe)
+                                                         prefixes)
             (.isAskType bound)       (.ask qe)
             (.isConstructType bound) (graph->db (.construct qe) prefixes)
             (.isDescribeType bound)  (graph->db (.describe qe) prefixes)
@@ -464,22 +312,45 @@
    (reducible db x nil nil))
   ([db x bindings]
    (reducible db x bindings nil))
-  ([{:keys [^Model model ^Dataset dataset prefixes] :as db} x bindings opts]
-   (let [[^Query bound ^QueryExecBuilder builder]
-         (exec-builder db x bindings opts)]
+  ([{:keys [prefixes] :as db} x bindings opts]
+   (let [bound   (sparql/bind (if (string? x) (query x prefixes) x)
+                              bindings
+                              prefixes)
+         builder (sparql/query-exec-builder db bound opts)]
      (when-not (.isSelectType bound)
        (throw (ex-info (str "Not a SELECT query: " bound) {:query bound})))
      (reify IReduceInit
        (reduce [_ f init]
          (txn/calculate-read
-           (or dataset model)
+           (store db)
            #(with-open [qe (.build builder)]
-              (let [^RowSet rows (.select qe)]
-                (loop [acc init]
-                  (if (.hasNext rows)
-                    (let [acc (f acc (row (.next rows) prefixes))]
-                      (if (reduced? acc) @acc (recur acc)))
-                    acc))))))))))
+              (sparql/reduce-rows f init (.select qe) prefixes))))))))
+
+(defn update-request
+  "The Jena UpdateRequest of the SPARQL Update string `s`, parsed with the
+  `prefixes` set beforehand, default-prefixes unless given, so that `s`
+  needs no PREFIX lines for them."
+  (^UpdateRequest [s]
+   (update-request s term/default-prefixes))
+  (^UpdateRequest [s prefixes]
+   (doto (UpdateRequest.)
+     (.setPrefixMapping (convert/prefix-mapping prefixes))
+     (UpdateFactory/parse ^String s))))
+
+(defn update!
+  "Run the SPARQL Update `x`, a string or an UpdateRequest, on `db` with the
+  `bindings` in one write transaction, and return `db`.
+
+  A string is parsed with the prefixes of `db`. A binding gives a variable
+  one value, e.g. {'?s :ex/luke}, which goes in as an RDF term, never as
+  SPARQL text."
+  ([db x]
+   (update! db x nil))
+  ([{:keys [prefixes] :as db} x bindings]
+   (let [request (if (string? x) (update-request x prefixes) x)
+         builder (sparql/update-exec-builder db request bindings)]
+     (txn/calculate-write (store db) #(.execute (.build builder)))
+     db)))
 
 (def properties-query
   "The query of the predicates and objects of ?s."
@@ -489,44 +360,9 @@
   "The query of the subjects that link to ?o by the predicate ?p."
   (query "SELECT ?s WHERE { ?s ?p ?o }"))
 
-(defn- property-map
-  "The map of the predicate of each of the `rows` to its object, or to a set
-  of its objects when it has several."
-  [rows]
-  (reduce (fn [m {:syms [?p ?o]}]
-            (let [v (get m ?p ::none)]
-              (assoc m ?p (cond
-                            (= ::none v) ?o
-                            (set? v)     (conj v ?o)
-                            (= v ?o)     v
-                            :else        #{v ?o}))))
-          {}
-          rows))
-
-;; Concise Bounded Description (W3C Member Submission, 2005), section 2,
-;; without the reifications of its third step
-(defn- describe
-  "The property map of the `rows` of a subject in `db`, with each blank node
-  among the values replaced by the property map of its own rows, unless
-  it's one of the subjects `seen` on the way there."
-  [db rows seen]
-  (update-vals
-    (property-map rows)
-    (fn [v]
-      (let [expand (fn [x]
-                     (if (and (term/blank-node? x) (not (seen x)))
-                       (assoc (describe db
-                                        (q db properties-query {'?s x})
-                                        (conj seen x))
-                         :rdf/about x)
-                       x))]
-        (if (set? v)
-          (into #{} (map expand) v)
-          (expand v))))))
-
 (defn- inferred
-  "The property map of the `rows` of `subject` in `db` that its inference
-  Model infers: those in neither its raw graph nor its schema."
+  "The property map of the `rows` of `subject` in `db`, a db of an inference
+  Model, that are in neither its raw graph nor its schema."
   [{:keys [^Model model prefixes] :as db} subject rows]
   (let [^BaseInfGraph g (.getGraph model)
         rows-in         #(q (->Db (ModelFactory/createModelForGraph %)
@@ -538,7 +374,7 @@
                               (mapcat rows-in)
                               (keep identity [(.getRawGraph g)
                                               (.getSchemaGraph g)]))]
-    (property-map (remove asserted rows))))
+    (entity/property-map (remove asserted rows))))
 
 ;; TODO: an option for one value or a set by a schema, as in Datomic, e.g.
 ;; SHACL's sh:maxCount 1 or owl:FunctionalProperty, instead of by the data
@@ -552,63 +388,22 @@
   can go back into transact! as it is. For a db of an inference Model, the
   metadata of the entity has the :inferred properties: those in neither the
   raw graph nor the schema. The entity is read in one read transaction."
-  [{:keys [^Model model ^Dataset dataset] :as db} subject]
-  (txn/calculate-read
-    (or dataset model)
-    #(let [rows (q db properties-query {'?s subject})]
-       (when (seq rows)
-         (cond-> (assoc (describe db rows #{subject}) :rdf/about subject)
+  [{:keys [^Model model] :as db} subject]
+  (let [rows-of #(q db properties-query {'?s %})]
+    (txn/calculate-read
+      (store db)
+      #(when-let [rows (not-empty (rows-of subject))]
+         (cond-> (assoc (entity/describe rows-of rows #{subject})
+                   :rdf/about subject)
            (and model (instance? BaseInfGraph (.getGraph model)))
            (with-meta {:inferred (inferred db subject rows)}))))))
 
-(defn- pull*
-  "The part of the entity `x` in `db` that the `pattern` selects, with its
-  :rdf/about, at the `depth` of recursion, past the subjects `seen`. The
-  entity is a subject, or the map of a blank node that entity expanded."
-  [db pattern x depth seen]
-  (let [e        (if (map? x) x (entity db x))
-        subject  (if (map? x) (:rdf/about x) x)
-        seen     (conj seen subject)
-        wild?    (some #{'*} pattern)
-        attrs    (set (remove #(or (map? %) (= '* %)) pattern))
-        nested   (apply merge (filter map? pattern))
-        incoming (fn [p]
-                   (let [ss (into #{}
-                                  (map '?s)
-                                  (q db subjects-query
-                                     {'?p (reverse-property p) '?o subject}))]
-                     (if (next ss) ss (first ss))))
-        selected (merge (into {}
-                              (filter #(or wild?
-                                           (attrs (key %))
-                                           (contains? nested (key %))))
-                              (dissoc e :rdf/about))
-                        (into {}
-                              (keep #(when-let [v (and (reverse-property %)
-                                                       (incoming %))]
-                                       [% v]))
-                              (concat attrs (keys nested))))
-        pull-v   (fn [spec v]
-                   (let [id (if (map? v) (:rdf/about v) v)]
-                     (or (when (or (map? v) (keyword? v) (term/blank-node? v)
-                                   (term/iri-string? v))
-                           (cond
-                             (vector? spec)
-                             (pull* db spec v 0 #{})
-
-                             (and (not (seen id))
-                                  (or (= '... spec) (< depth spec)))
-                             (pull* db pattern v (inc depth) seen)))
-                         v)))]
-    (when (or e (seq selected))
-      (reduce-kv (fn [m p v]
-                   (assoc m p (if-let [spec (get nested p)]
-                                (if (set? v)
-                                  (into #{} (map #(pull-v spec %)) v)
-                                  (pull-v spec v))
-                                v)))
-                 {:rdf/about subject}
-                 selected))))
+(defn- links-to
+  "The subjects that link to `subject` in `db` by the predicate `p`, as one
+  value or a set of them, or nil when there are none."
+  [db p subject]
+  (entity/property-value
+    (map '?s (q db subjects-query {'?p p '?o subject}))))
 
 (defn pull
   "The properties of `subject` in `db` that the `pattern` selects, in the
@@ -627,42 +422,7 @@
   A predicate has its value, or a set of values when it has several. A
   recursion stops at a subject that it has already pulled on its way."
   [db pattern subject]
-  (pull* db pattern subject 0 #{}))
-
-(defn- substitute
-  "The builder `b` with the variable `k` bound to the value `v`, under
-  `prefixes`."
-  ^UpdateExecBuilder [^UpdateExecBuilder b k v prefixes]
-  (let [n (convert/node k prefixes)]
-    (if (and (instance? Var n) (not (or (sequential? v) (set? v))))
-      (.substitution b ^Var n ^Node (convert/node v prefixes))
-      (throw (ex-info (str "Not a variable with one value: " k)
-                      {:variable k :value v})))))
-
-(defn update!
-  "Run the SPARQL Update `x`, a string or an UpdateRequest, on `db` with the
-  `bindings` in one write transaction, and return `db`.
-
-  A string is parsed with the prefixes of `db`. A binding gives a variable
-  one value, e.g. {'?s :ex/luke}, which goes in as an RDF term, never as
-  SPARQL text."
-  ([db x]
-   (update! db x nil))
-  ([{:keys [^Model model ^Dataset dataset prefixes] :as db} x bindings]
-   (let [^UpdateRequest request (if (string? x)
-                                  (doto (UpdateRequest.)
-                                    (.setPrefixMapping
-                                      (convert/prefix-mapping prefixes))
-                                    (UpdateFactory/parse ^String x))
-                                  x)
-         builder                (reduce-kv #(substitute %1 %2 %3 prefixes)
-                                           (-> (if dataset
-                                                 (UpdateExec/dataset
-                                                   (.asDatasetGraph dataset))
-                                                 (UpdateExec/graph
-                                                   (.getGraph model)))
-                                               (.update request))
-                                           bindings)]
-     (txn/calculate-write (or dataset model)
-                          #(.execute (.build ^UpdateExecBuilder builder)))
-     db)))
+  (entity/pull {:entity   #(entity db %)
+                :links-to #(links-to db %1 %2)}
+               pattern
+               subject))

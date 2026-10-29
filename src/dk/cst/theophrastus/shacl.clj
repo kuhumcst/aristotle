@@ -42,6 +42,12 @@
 ;; SHACL, section 3.6: a validation report has a result for each failure,
 ;; with its focus node, path, value, source shape, constraint component and
 ;; severity
+(defn- report->map
+  "The map of the validation `report`, with values under `prefixes`."
+  [^ValidationReport report prefixes]
+  {:conforms? (.conforms report)
+   :entries   (mapv #(entry->map % prefixes) (.getEntries report))})
+
 (defn validate
   "The SHACL report of `db` against the `shapes`, or only of its `node`, as
   {:conforms? boolean, :entries [...]} in a read transaction.
@@ -52,21 +58,17 @@
   string of SPARQL syntax."
   ([db shapes]
    (validate db shapes nil))
-  ([{:keys [model dataset prefixes] :as db} ^Shapes shapes node]
+  ([{:keys [prefixes] :as db} ^Shapes shapes node]
    (let [prefixes (assoc prefixes :sh "<http://www.w3.org/ns/shacl#>")]
      (txn/calculate-read
-       (or dataset model)
-       #(let [^Graph g                 (theo/jena-graph db)
-              ^ValidationReport report (if (some? node)
-                                         (.validate (ShaclValidator/get) shapes
-                                                    g ^Node (convert/node
-                                                              node prefixes))
-                                         (.validate (ShaclValidator/get) shapes
-                                                    g))
-              entries                  (mapv (fn [e] (entry->map e prefixes))
-                                             (.getEntries report))]
-          {:conforms? (.conforms report)
-           :entries   entries})))))
+       (theo/store db)
+       #(let [validator (ShaclValidator/get)
+              g         (theo/jena-graph db)]
+          (report->map (if (some? node)
+                         (.validate validator shapes g
+                                    ^Node (convert/node node prefixes))
+                         (.validate validator shapes g))
+                       prefixes))))))
 
 (defn by-severity
   "The entries of the `report` grouped by their :severity."

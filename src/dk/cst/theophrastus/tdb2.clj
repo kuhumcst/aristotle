@@ -18,8 +18,8 @@
   "Compact the TDB2 database of `db`, which may be a view of one of its
   graphs, and delete the generation it replaces. TDB2 only frees the space
   of deleted and changed data when it compacts."
-  [{:keys [model dataset] :as db}]
-  (let [t   (txn/transactional (or dataset model))
+  [db]
+  (let [t   (txn/transactional (theo/store db))
         dsg (if (instance? Dataset t) (.asDatasetGraph ^Dataset t) t)]
     (if (and dsg (DatabaseMgr/isTDB2 ^DatasetGraph dsg))
       (DatabaseMgr/compact dsg true)

@@ -6,7 +6,7 @@
   (:import [clojure.lang ExceptionInfo]
            [java.net URI]
            [java.time LocalDate OffsetDateTime]
-           [org.apache.jena.graph Node NodeFactory]
+           [org.apache.jena.graph Node NodeFactory Triple]
            [org.apache.jena.sparql.core Var]
            [org.apache.jena.sparql.util NodeFactoryExtra]))
 
@@ -209,3 +209,28 @@
     (is (= (.toInstant date)
            (.toInstant ^OffsetDateTime (term/value (convert/data n prefixes))))
         "a Date comes back through value as an OffsetDateTime, the same instant")))
+
+(deftest clojure->triples
+  (let [ex #(convert/node (keyword "ex" %) prefixes)]
+    (is (= [(Triple/create (ex "a") (ex "knows") (ex "b"))]
+           (convert/triples [:ex/a :ex/knows :ex/b] prefixes))
+        "a triple on its own")
+    (is (= [(Triple/create (ex "b") (ex "knows") (ex "a"))]
+           (convert/triples {:rdf/about :ex/a :ex/_knows :ex/b} prefixes))
+        "a reverse predicate links the other way")
+    (let [[link name] (convert/triples {:rdf/about :ex/a
+                                        :ex/friend {:ex/name "C"}}
+                                       prefixes)]
+      (is (.isBlank (.getObject link)))
+      (is (= (.getObject link) (.getSubject name))
+          "a nested map is a subject of its own"))
+    (is (= [(ex "a") Node/ANY Node/ANY]
+           (convert/pattern->nodes [:ex/a '_ '_] prefixes)))
+    (is (thrown-with-msg? ExceptionInfo #"Not a pattern"
+                          (convert/pattern->nodes [[:ex/a '_ '_]] prefixes)))))
+
+(deftest reverse-property
+  (is (= :ex/knows (convert/reverse-property :ex/_knows)))
+  (is (nil? (convert/reverse-property :ex/knows)))
+  (is (nil? (convert/reverse-property :rdf/_1))
+      "a container membership property"))

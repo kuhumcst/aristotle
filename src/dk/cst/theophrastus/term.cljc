@@ -132,6 +132,17 @@
   [^LangString x]
   (.-lang x))
 
+#?(:clj
+   (defmethod print-method LangString
+     [^LangString x ^java.io.Writer writer]
+     (.write writer "#rdf/langstring ")
+     (print-method [(.-s x) (.-lang x)] writer)))
+
+(defn read-langstring
+  "The LangString of the vector `form`, [s lang], for the tag #rdf/langstring."
+  [[s lang :as form]]
+  (->LangString s lang))
+
 (deftype Literal [s datatype]
   Object
   (toString [_]
@@ -167,6 +178,17 @@
   [^Literal x]
   (.-datatype x))
 
+#?(:clj
+   (defmethod print-method Literal
+     [^Literal x ^java.io.Writer writer]
+     (.write writer "#rdf/literal ")
+     (print-method [(.-s x) (.-datatype x)] writer)))
+
+(defn read-literal
+  "The Literal of the vector `form`, [s datatype], for the tag #rdf/literal."
+  [[s datatype :as form]]
+  (->Literal s datatype))
+
 (defprotocol AsLiteral
   "A value that has a Literal: the inverse of value."
   (as-literal [x]
@@ -194,28 +216,6 @@
      (->Literal s (str "<" dt-iri ">"))
      (throw (ex-info (str "Not a datatype IRI: " (pr-str dt))
                      {:datatype dt})))))
-
-#?(:clj
-   (defmethod print-method LangString
-     [^LangString x ^java.io.Writer writer]
-     (.write writer "#rdf/langstring ")
-     (print-method [(.-s x) (.-lang x)] writer)))
-
-#?(:clj
-   (defmethod print-method Literal
-     [^Literal x ^java.io.Writer writer]
-     (.write writer "#rdf/literal ")
-     (print-method [(.-s x) (.-datatype x)] writer)))
-
-(defn read-langstring
-  "The LangString of the vector `form`, [s lang], for the tag #rdf/langstring."
-  [[s lang :as form]]
-  (->LangString s lang))
-
-(defn read-literal
-  "The Literal of the vector `form`, [s datatype], for the tag #rdf/literal."
-  [[s datatype :as form]]
-  (->Literal s datatype))
 
 ;; XSD 1.1 Part 2, sections 3.4.13 to 3.4.25
 (def integer-bounds
