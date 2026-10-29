@@ -46,8 +46,8 @@ Data
 - A query returns an xsd:decimal, date or time as a Literal, rather than as
   a BigDecimal, Date or XSDDateTime. On the JVM, `term/value` turns it into
   a BigDecimal or a java.time value.
-- A string with a language tag is the LangString of the term namespace, not
-  the one of ont-app.
+- A string with a language tag is a LangString from the term namespace,
+  not ont-app's LangStr.
 - A java.net.URL is no longer an IRI, since it can change one. Use a
   java.net.URI or a string in angle brackets.
 - A symbol that isn't a variable or a blank node throws, rather than

@@ -7,7 +7,8 @@ or Dataset, in memory or on disk with TDB2. Then you query it with SPARQL,
 read its subjects as maps and write Clojure data to it. The library was made
 for [DanNet](https://github.com/kuhumcst/DanNet), the Danish WordNet. It
 began as a fork of [Aristotle](https://github.com/arachne-framework/aristotle);
-see [From Aristotle](doc/from-aristotle.md) for what changed.
+see [From Aristotle](doc/from-aristotle.md) for what changed, and
+[Design](doc/design.md) for the decisions behind it.
 
 - **An API like Datomic's.** If you know Datomic, `q`, `entity`, `pull` and
   `transact!` will look familiar. What they return follows RDF and SPARQL,
@@ -16,17 +17,14 @@ see [From Aristotle](doc/from-aristotle.md) for what changed.
   with Flint. The values you bind go into a query as RDF terms, never as
   text, so a value from a user can't change the query.
 - **Terms as Clojure values.** An IRI is a keyword or a string in angle
-  brackets, and a literal is a Clojure value. A literal with no Clojure type
-  of its own prints with a tag and reads back. The terms also work in
+  brackets, and a literal is a Clojure value. The terms also work in
   ClojureScript, e.g. in EDN sent to a browser.
-- **Transactions where the store has them.** Each write is one transaction
-  in TDB2 or any other Dataset with transactions, and you can group several
-  writes in one.
+- **Transactions.** Each write is one transaction wherever the store has
+  them, e.g. in TDB2, and you can group several writes in one.
 - **Rules, functions and SHACL.** Build an inference Model from Jena rules,
   call Clojure functions from SPARQL, and get SHACL reports as data.
-- **Close to the standards.** Where RDF, SPARQL or XSD has a rule, e.g. for
-  what an IRI is or how language tags compare, the code follows it and
-  cites it.
+- **Close to the standards.** Where RDF, SPARQL or XSD has a rule, the code
+  follows it and cites it.
 
 > This library was developed with assistance from frontier LLMs.
 
@@ -87,15 +85,15 @@ RDF terms
 
 An IRI is a keyword when the db has its prefix, e.g. `:rdfs/label`, and
 otherwise a string in angle brackets, e.g. `"<https://cst.dk>"`. Only a
-string that matches the IRIREF rule of SPARQL, with a scheme, is an IRI, so
+string that matches SPARQL's IRIREF rule, with a scheme, is an IRI, so
 `"<b>bold</b>"` stays a string. A blank node is a symbol that starts with
 `_`, e.g. `_b1`.
 
-The prefixes map each prefix as a keyword to its namespace in angle
+The prefixes map each prefix (a keyword) to its namespace in angle
 brackets, as Flint's do, and `term/default-prefixes` has rdf, rdfs, xsd and
-owl. Jena stores the prefixes of a db with its data, so a TDB2 database
-keeps them, and the files you write have them. When the prefixes you pass to
-`theo/db` differ from the stored ones, they replace them.
+owl. Jena stores them with the data, so a TDB2 database keeps them and the
+files you write have them. The prefixes you pass to `theo/db` replace the
+stored ones.
 
 A literal is a Clojure value when a type holds it exactly:
 
@@ -136,9 +134,7 @@ To write such a value, pass it as it is, or turn it into a Literal with
 To write values of a type of your own, extend `term/AsIri` when the type
 stands for an IRI, or `term/AsLiteral` when it has a literal. Both also work
 in ClojureScript. For any other RDF term, extend `convert/AsNode`, which
-turns a value into a Jena node. Each protocol has a method that you extend,
-e.g. `as-iri`, and a function that you call, e.g. `term/iri`, as with
-`as-file` and `file` in clojure.java.io.
+turns a value into a Jena node.
 
 Writing
 -------
@@ -160,10 +156,8 @@ it has none:
 - a nested map is a subject of its own;
 - a predicate such as `:ex/_knows` links the other way.
 
-The function converts all the data before it writes, so an error leaves
-the db as it was. A Jena Graph or Model works as data too. To turn the data
-into Jena triples without writing it, e.g. for Jena's own API, use
-`convert/triples`.
+The data is all converted before anything is written, so an error leaves
+the db as it was. A Jena Graph or Model works as data too.
 
 Remove triples with `theo/retract!`, where `_` in a pattern matches
 anything, and run a SPARQL Update with `theo/update!`:
@@ -174,19 +168,18 @@ anything, and run a SPARQL Update with `theo/update!`:
 (theo/update! db "DELETE WHERE { ?p ex:age ?age }" {'?p :ex/bob})
 ```
 
-To parse an update once, e.g. one you run often, use `theo/update-request`
-with the prefixes and pass the result to `theo/update!`.
+To parse an update once and run it often, pass the result of
+`theo/update-request` to `theo/update!`.
 
 Read RDF files with `theo/read!` and write one with `theo/write`. The file
-name gives the syntax, e.g. Turtle for .ttl:
+name gives the syntax, e.g. Turtle for .ttl, and all the files are parsed
+before anything is added:
 
 ```clojure
 (theo/write db "people.ttl")
 
 (theo/read! db ["schema.ttl" "people.ttl"])
 ```
-
-A syntax error in any of the files leaves the db as it was.
 
 For an RDF list, use `theo/rdf-list` in a map, and for a container
 `theo/rdf-bag`, `theo/rdf-seq` or `theo/rdf-alt`:
@@ -213,16 +206,15 @@ the union of the named graphs:
 ;; => {:rdf/about :ex/dave :rdfs/label "Dave"}
 ```
 
-Each one is a view of the Dataset, and cheap to make. It has the prefixes
-of the db and writes into the Dataset, in its transactions. The union can
-only be read.
+Each one is a cheap view of the Dataset with the same prefixes, and the
+union can only be read.
 
 Queries
 -------
 
 Run a SPARQL query with `theo/q`. Unlike Datomic's `q`, it takes the db
-first, as every other function that takes a db does. It parses a string
-with the prefixes of the db, so the query needs no PREFIX lines for them.
+first, like every other function that takes a db. It parses a string with
+the prefixes of the db, so the query needs no PREFIX lines for them.
 
 A binding gives a variable one value or several, or gives several
 variables rows of values, e.g. `{'[?p ?name] [[:ex/bob nil]]}` with nil for
@@ -236,15 +228,13 @@ the WHERE clause:
 ;; => [{?p :ex/bob ?name "Bob"} {?p :ex/carol ?name "Carol"}]
 ```
 
-A SELECT returns a vector of maps of variable to value, and an ASK a
-boolean. A CONSTRUCT or DESCRIBE returns a new db of the triples, in
-memory.
+A SELECT returns a vector of maps of variable to value, an ASK a boolean,
+and a CONSTRUCT or DESCRIBE a new db of the triples, in memory.
 
-To parse a query once, e.g. one you run often, use `theo/query` with the
-prefixes and pass the result to `theo/q`. After the bindings, an options map
-can set a `:timeout` in milliseconds. Jena only checks it when the query
-moves on to its next result, so for a hard limit, see
-`txn/with-hard-timeout`.
+To parse a query once and run it often, pass the result of `theo/query` to
+`theo/q`. After the bindings, an options map can set a `:timeout` in
+milliseconds. Jena only checks it when the query moves on to its next
+result, so for a hard limit, see `txn/with-hard-timeout`.
 
 For a result too large to hold in memory, `theo/reducible` takes the same
 arguments and runs a SELECT as you reduce over it, one row at a time:
@@ -255,16 +245,8 @@ arguments and runs a SELECT as you reduce over it, one row at a time:
         (theo/reducible db "SELECT ?l WHERE { ?s rdfs:label ?l }")))
 ```
 
-Its read transaction lasts as long as the reduction, so use it with
-`reduce`, `into`, `transduce` or `run!`. It isn't a collection, so `first`
-and `count` don't work on it.
-
-Where you run a query with Jena's own API, e.g. to keep its ResultSet,
-`convert/data` turns each Jena node in the results into the value that
-`theo/q` would return. For this, the sparql namespace has the parts of
-`theo/q`: `sparql/bind` adds bindings to a Query,
-`sparql/query-exec-builder` returns a QueryExecBuilder for a db, and
-`sparql/row` turns a row of a RowSet into a map.
+Its read transaction lasts as long as the reduction. Use it with `reduce`,
+`into`, `transduce` or `run!`, since `first` and `count` don't work on it.
 
 To write queries as data, add [Flint](https://github.com/yetanalytics/flint)
 to your deps and pass the string it formats to `theo/q`:
@@ -301,14 +283,13 @@ Read the properties of a subject as a map with `theo/entity`:
 ;;                               :rdf/rest  :rdf/nil}}}
 ```
 
-The subject is the `:rdf/about` of the map, as in `transact!`, so an entity
-can go back into `transact!` as it is. A subject with no properties is nil.
-A property has one value, or a set when the data has several. A blank node
-among the values becomes a map of its own properties, as in a
-[Concise Bounded Description](https://www.w3.org/submissions/CBD/), with its
-label as `:rdf/about`. For a db of an inference Model, the metadata of the
-entity has the `:inferred` properties (see
-[Rules](#rules-functions-and-shacl)).
+The subject is the `:rdf/about` of the map, so an entity can go back into
+`transact!` as it is, and a subject with no properties is nil. A property
+has one value, or a set when the data has several. A blank node among the
+values becomes a map of its own properties, as in a
+[Concise Bounded Description](https://www.w3.org/submissions/CBD/). For a
+db of an inference Model, the metadata of the entity has the `:inferred`
+properties (see [Rules](#rules-functions-and-shacl)).
 
 Pull a pattern with `theo/pull`, in Datomic's order:
 
@@ -342,8 +323,8 @@ Model of the db, which `theo/store` returns:
 ```
 
 `txn/with-read-transaction` does the same for reads. For a block that only
-writes some of the time, `txn/with-transaction` runs it in a transaction
-that starts as a read and becomes a write at the first write:
+writes some of the time, `txn/with-transaction` starts as a read and
+becomes a write at the first write:
 
 ```clojure
 (txn/with-transaction (theo/store db)
@@ -351,18 +332,16 @@ that starts as a read and becomes a write at the first write:
     (theo/transact! db [[:ex/bob :rdfs/label "Bob"]])))
 ```
 
-That first write fails if another one has committed since the transaction
-began, so a block that always writes is better off with
-`txn/with-write-transaction`. Each macro has a function that takes a
-function of no arguments instead: `txn/calculate-write`,
-`txn/calculate-read` and `txn/calculate`.
+That first write fails if another one has committed in the meantime, so a
+block that always writes is better off with `txn/with-write-transaction`.
+Each macro also comes as a function that takes a function of no arguments,
+e.g. `txn/calculate-write`.
 
 The db that `theo/db` makes in memory has transactions. With
-`:transactional? false`, it makes a plain Model instead, which is faster
-to fill and read, e.g. for a large import or the schema of a reasoner.
-Other threads then see each write as it happens, and a failure partway
-through isn't undone. A Model also has only one graph, so `named-graph`
-throws on it.
+`:transactional? false`, it's a plain Model instead, which is faster to
+fill and read, e.g. for a large import or the schema of a reasoner. Other
+threads then see each write as it happens, a failure partway through isn't
+undone, and the Model has only one graph.
 
 Connect to a TDB2 database with `tdb2/connect`, which creates it when the
 directory doesn't exist:
@@ -407,8 +386,8 @@ symmetric rule such as this one doesn't loop. Jena's own OWL rules are
 `rules/owl-rules` and `rules/mini-rules`.
 
 Register a Clojure function for SPARQL with `function/register!`. It
-takes and returns the same values as the query that calls it, under the
-prefixes of its db, and a nil from it leaves the result unbound:
+takes and returns the same values as the query that calls it, and a nil
+from it leaves the result unbound:
 
 ```clojure
 (require '[dk.cst.theophrastus.function :as function]
@@ -421,8 +400,7 @@ prefixes of its db, and a nil from it leaves the result unbound:
 ```
 
 Jena has one registry of functions for the whole JVM, so every query can
-call the function. The prefixes passed to `function/register!` resolve its
-name, and they convert its values for a query run with Jena's own API.
+call it.
 
 Validate a db against SHACL shapes with `shacl/validate`. The report is
 data, with the same values as a query and the sh prefix for SHACL's terms:
@@ -440,6 +418,22 @@ data, with the same values as a query and the sh prefix for SHACL's terms:
 ;; => {:focus-node :ex/alice :path :ex/age :severity :sh/Violation}
 ```
 
+Jena's own API
+--------------
+
+Where you need Jena's own API, e.g. to keep a ResultSet, these convert
+between the two:
+
+- `theo/store` and `theo/jena-graph`, for the Dataset or Model of a db and
+  its Graph;
+- `convert/node` and `convert/triples`, for Clojure data as Jena nodes and
+  triples;
+- `convert/data`, for a Jena node as the value that `theo/q` returns;
+- the sparql namespace, with the parts of `theo/q`: `sparql/bind` adds
+  bindings to a Query, `sparql/query-exec-builder` returns a
+  QueryExecBuilder for a db, and `sparql/row` turns a row of a RowSet into
+  a map.
+
 Not yet
 -------
 
@@ -449,7 +443,6 @@ Not yet
 - a query that returns a set of tuples
 - one value or a set by a schema, e.g. SHACL's sh:maxCount 1
 - queries in Datomic's syntax
-- a release on Clojars
 
 Development
 -----------
