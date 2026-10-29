@@ -394,6 +394,21 @@
         (.getDefaultGraph dsg)))
     (.getGraph model)))
 
+(defn triples
+  "The triples of `db` that match the [s p o] `pattern`, where _ matches
+  anything, as [s p o] vectors of Clojure values. They are read in one read
+  transaction."
+  [{:keys [prefixes] :as db} pattern]
+  (txn/calculate-read
+    (store db)
+    #(let [[^Node s ^Node p ^Node o] (convert/pattern->nodes pattern prefixes)]
+       (into []
+             (map (fn [^Triple t]
+                    [(convert/data (.getSubject t) prefixes)
+                     (convert/data (.getPredicate t) prefixes)
+                     (convert/data (.getObject t) prefixes)]))
+             (.toList (.find (query-graph db) s p o))))))
+
 (defn- property-pairs
   "The predicate and object of each of the Jena `triples` as Clojure
   values, with `prefixes` for keywords."

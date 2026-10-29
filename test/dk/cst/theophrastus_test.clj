@@ -437,6 +437,20 @@
     (is (nil? (theo/entity db :ex/nobody)))
     (is (nil? (:inferred (meta luke))) "no inference model")))
 
+(deftest triples
+  (doseq [db (people-dbs)]
+    (is (= #{[:ex/luke :ex/friends :ex/jim] [:ex/luke :ex/friends :ex/jamie]}
+           (set (theo/triples db [:ex/luke :ex/friends '_]))))
+    (is (= [[:ex/thom :ex/friends :ex/luke]]
+           (theo/triples db ['_ :ex/friends :ex/luke]))
+        "_ matches anything")
+    (is (= [['_building :ex/floor 3]] (theo/triples db ['_ :ex/floor '_]))
+        "blank nodes and literals as Clojure values")
+    (is (= (set people) (set (theo/triples db '[_ _ _]))))
+    (is (empty? (theo/triples db [:ex/nobody '_ '_])))
+    (is (thrown-with-msg? ExceptionInfo #"Not a pattern"
+                          (theo/triples db [:ex/luke :ex/name])))))
+
 (deftest inferred-entity
   (let [schema [[:ex/Dog :rdfs/subClassOf :ex/Animal]]
         data   [[:ex/rex :rdf/type :ex/Dog] [:ex/rex :ex/name "Rex"]]

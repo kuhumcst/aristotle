@@ -306,13 +306,21 @@ A pattern can also have `'*` for every predicate. A map such as
 number in place of `'...` limits the depth. A reverse predicate such as
 `:ex/_knows`, as in `transact!`, pulls the subjects that link to this one.
 
+To read the triples that match a pattern of `retract!` instead, use
+`theo/triples`:
+
+```clojure
+(theo/triples db ['_ :ex/knows :ex/bob])
+;; => [[:ex/alice :ex/knows :ex/bob]]
+```
+
 Transactions and TDB2
 ---------------------
 
 The functions that end in `!` each write in one transaction, and `theo/q`,
-`theo/entity` and `theo/pull` each read in one. To run several functions
-in one transaction, use the macros of the txn namespace with the Dataset or
-Model of the db, which `theo/store` returns:
+`theo/triples`, `theo/entity` and `theo/pull` each read in one. To run
+several functions in one transaction, use the macros of the txn namespace
+with the Dataset or Model of the db, which `theo/store` returns:
 
 ```clojure
 (require '[dk.cst.theophrastus.txn :as txn])
