@@ -1,13 +1,12 @@
 (ns dk.cst.theophrastus.impl.files
-  "RDF files of one graph, for read! and write: their syntax by name, and
-  parsing them."
+  "The syntax and parsing of RDF files of one graph, for read! and write."
   (:require [clojure.java.io :as io])
   (:import [org.apache.jena.graph Graph GraphMemFactory]
            [org.apache.jena.riot Lang RDFLanguages RDFParser]))
 
 (defn syntax
-  "The Jena Lang of the syntax that the name of the `file` gives, e.g.
-  Turtle for .ttl, which must be a syntax of one graph."
+  "The Jena Lang that the name of the `file` gives, e.g. Turtle for .ttl. It
+  throws when there is none, or when it's a syntax of several graphs."
   ^Lang [file]
   (let [lang (RDFLanguages/filenameToLang (str file))]
     (cond
@@ -21,8 +20,8 @@
       lang)))
 
 (defn parse
-  "A new in-memory Graph of the triples in the RDF files of the `sources`,
-  each a File, a URL, a URI or a file path."
+  "A new in-memory Graph of the triples in the RDF files of the `sources`
+  (each a File, URL, URI or file path)."
   ^Graph [sources]
   (let [g (GraphMemFactory/createDefaultGraph)]
     (doseq [s sources

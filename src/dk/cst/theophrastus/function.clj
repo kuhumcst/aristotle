@@ -1,6 +1,6 @@
 (ns dk.cst.theophrastus.function
-  "SPARQL functions written in Clojure, registered with Jena's ARQ, so that
-  any query can call them by their IRI.
+  "SPARQL functions written in Clojure, which any query can call by their
+  IRI once they're registered with Jena's ARQ.
 
   See https://jena.apache.org/documentation/query/writing_functions.html"
   (:require [dk.cst.theophrastus.convert :as convert]
@@ -14,8 +14,8 @@
            [org.apache.jena.sparql.util Context]))
 
 (defn- ->function
-  "The ARQ Function of the Clojure function `f`, with values under the
-  prefixes of the db that the query runs on, or else under `prefixes`."
+  "The ARQ Function of the Clojure function `f`. Its keywords use the
+  prefixes of the query's db, or `prefixes` when the query has none."
   ^Function [f prefixes]
   (reify Function
     (build [_ _uri _args _context])
@@ -33,13 +33,13 @@
           (NodeValue/makeNode ^Node (convert/node r prefixes)))))))
 
 (defn factory
-  "The ARQ FunctionFactory of the Clojure function `f`, whose arguments and
-  result are values as the query has them: under the prefixes of the db
-  that theophrastus/q runs it on, or else under `prefixes`, default-prefixes
-  unless given.
+  "The ARQ FunctionFactory of the Clojure function `f`, which takes and
+  returns values as theo/q returns them. Its keywords use the prefixes of
+  the db that theo/q runs the query on, or `prefixes` for a query run
+  another way (term/default-prefixes when none are given).
 
-  A nil from `f` leaves the result unbound, as an error in SPARQL does. An
-  exception from `f` fails the query."
+  When `f` returns nil, the result is unbound, as after an error in SPARQL.
+  An exception from `f` fails the query."
   ([f]
    (factory f term/default-prefixes))
   ([f prefixes]
@@ -49,10 +49,10 @@
          function)))))
 
 (defn register!
-  "Register the Clojure function `f` with ARQ under the IRI `iri`, so that
-  any query can call it, and return `iri`. The IRI is a keyword under
-  `prefixes`, default-prefixes unless given, or a string in angle brackets.
-  The arguments and result of `f` are values, as for factory."
+  "Register the Clojure function `f` with ARQ as `iri`, so that any query
+  can call it, and return `iri`. The IRI is a string in angle brackets or a
+  keyword, with `prefixes` for keywords (term/default-prefixes when none
+  are given). The function takes and returns values, as for factory."
   ([iri f]
    (register! iri f term/default-prefixes))
   ([iri f prefixes]

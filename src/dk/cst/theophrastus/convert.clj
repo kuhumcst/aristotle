@@ -1,7 +1,7 @@
 (ns dk.cst.theophrastus.convert
   "Jena nodes to Clojure values and back, with the RDF terms of the term
-  namespace, and the Jena triples and patterns of the data that
-  theophrastus/transact! and theophrastus/retract! take."
+  namespace. It also turns the data that theo/transact! and theo/retract!
+  take into Jena triples and patterns."
   (:require [dk.cst.theophrastus.term :as term]
             [clojure.string :as str]
             [dk.simongray.langtag :as langtag])
@@ -38,14 +38,14 @@
     (.setNsPrefixes ^Map (ns-prefix-map prefixes))))
 
 (def ^org.apache.jena.sparql.util.Symbol prefixes-symbol
-  "The key under which the context of a query holds the prefixes of its db,
-  so that a SPARQL function can convert values as the query does."
+  "The key that holds the prefixes of the db in a query's context, so that a
+  SPARQL function can convert values as the query does."
   (org.apache.jena.sparql.util.Symbol/create "dk.cst.theophrastus/prefixes"))
 
 (def namespace-index
-  "The namespaces of `prefixes`, longest first, each as [prefix namespace]
-  without angle brackets. It's memoized, since a db reads every IRI with
-  the same prefixes."
+  "The namespaces of `prefixes` as [prefix namespace] pairs, without angle
+  brackets and longest first. It's memoized, since a db reads every IRI
+  with the same prefixes."
   (memoize
     (fn [prefixes]
       (->> (for [[prefix ns-iri] prefixes
@@ -56,9 +56,10 @@
            (vec)))))
 
 (defn iri->data
-  "The IRI `s` as a keyword, when the longest namespace of `prefixes` that
-  it starts with leaves a name, without a slash, or else in angle brackets.
-  A keyword with an empty name, e.g. :owl/, can't be read back."
+  "The IRI `s` as a keyword, by the longest namespace in `prefixes` that it
+  starts with, or in angle brackets when there is none. It also stays in
+  angle brackets when the rest is empty or has a slash, since that keyword
+  couldn't be read back."
   [^String s prefixes]
   ;; reduce and nth rather than some and second, which allocate a seq for
   ;; each namespace, since this runs for every IRI that a query returns
@@ -75,7 +76,7 @@
 
 (defn literal->data
   "The Clojure value of the literal `node`: a string, a LangString, the value
-  of a native datatype, or else a Literal."
+  of a native datatype, or a Literal."
   [^Node node]
   (let [lex  (.getLiteralLexicalForm node)
         dt   (.getLiteralDatatypeURI node)
@@ -100,10 +101,10 @@
           x)))))
 
 (defn data
-  "The value of the Jena `node` as a query returns it, with IRIs under the
-  `prefixes` as keywords, default-prefixes unless given, e.g. for the rows of
-  a ResultSet from Jena's own query API. A nil node, e.g. an unbound
-  variable, is nil."
+  "The Clojure value of the Jena `node`, as theo/q returns it, with
+  `prefixes` for keywords (term/default-prefixes when none are given). It
+  returns nil for a nil node, e.g. an unbound variable. Use it on the
+  results of Jena's own query API."
   ([node]
    (data node term/default-prefixes))
   ([^Node node prefixes]
@@ -120,14 +121,14 @@
 
 (defprotocol AsNode
   "A Clojure value that stands for an RDF term. A type that stands for an
-  IRI or has a Literal only needs term/AsIri or term/AsLiteral, which
-  ClojureScript has too. Extend AsNode for any other term, e.g. Jena's own
+  IRI or has a Literal only needs term/AsIri or term/AsLiteral, which also
+  work in ClojureScript. Extend AsNode for any other term, e.g. Jena's own
   RDFNode or a type of yours for blank nodes."
   (as-node [x prefixes]
     "The Jena node of `x`, as node returns it."))
 
 (defn node
-  "The Jena node of `x`, with a keyword's prefix looked up in `prefixes`."
+  "The Jena node of `x`, with `prefixes` for keywords."
   ^Node [x prefixes]
   (as-node x prefixes))
 
@@ -213,16 +214,16 @@
   (and (vector? x) (= 3 (count x)) (not-any? coll? x)))
 
 (defn- subject-node
-  "The Jena node of the subject of the map `m`: its :rdf/about, or else a
-  new blank node."
+  "The Jena node for the subject of the map `m`: its :rdf/about, or a new
+  blank node when there is none."
   ^Node [m prefixes]
   (if-let [about (:rdf/about m)]
     (node about prefixes)
     (NodeFactory/createBlankNode)))
 
 (defn- conj-map-triples!
-  "The transient `acc` with the Jena triples of the properties of the map
-  `m`, whose subject is the Jena node `s`, with keywords under `prefixes`."
+  "Add the Jena triples of the map `m`, whose subject is the node `s`, to
+  the transient `acc`, with `prefixes` for keywords."
   [acc m s prefixes]
   (reduce-kv
     (fn [acc p v]
@@ -246,8 +247,8 @@
     m))
 
 (defn- conj-triples!
-  "The transient `acc` with the Jena triples of `tx-data`, as triples
-  returns them."
+  "Add the Jena triples of `tx-data` to the transient `acc`, with
+  `prefixes` for keywords."
   [acc tx-data prefixes]
   (cond
     (map? tx-data)
@@ -268,20 +269,14 @@
 
 ;; one transient vector for all of them, since tx-data can have millions
 (defn triples
-  "The Jena triples of `tx-data`, as theophrastus/transact! takes it: [s p o]
-  triples of Clojure values, maps of a subject's properties, and colls of
-  these, with keywords under `prefixes`.
-
-  A map has the properties of its :rdf/about, or of a new blank node. A
-  nested map is a subject of its own, and a predicate such as :ex/_knows
-  links the other way."
+  "The Jena triples of `tx-data` (as theo/transact! takes it), with
+  `prefixes` for keywords."
   [tx-data prefixes]
   (persistent! (conj-triples! (transient []) tx-data prefixes)))
 
 (defn pattern->nodes
-  "The Jena nodes of the [s p o] `pattern` of Clojure values, as
-  theophrastus/retract! takes it, with Node/ANY for _, which matches
-  anything."
+  "The Jena nodes of the [s p o] `pattern` (as theo/retract! takes it), with
+  Node/ANY for _ and `prefixes` for keywords."
   [pattern prefixes]
   (if (triple? pattern)
     (mapv #(if (= '_ %) Node/ANY (node % prefixes)) pattern)

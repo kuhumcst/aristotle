@@ -2,13 +2,14 @@
   "Transactions on a Jena Graph, Model or Dataset, and a hard timeout.
 
   Each kind of transaction has a function that calls a function of no
-  arguments, e.g. calculate-read, and a macro that runs a body, e.g.
-  with-read-transaction. Either returns what the function or the body
-  returns. A Graph or Model of a dataset, e.g. TDB2, uses the transactions
-  of that dataset, also under an inference graph. A plain in-memory graph
-  has none, so the code runs as it is: other threads can see its writes,
-  and a failure partway through doesn't undo them. The in-memory db that
-  theophrastus/db makes has transactions, unless :transactional? is false."
+  arguments (e.g. calculate-read) and a macro that runs a body (e.g.
+  with-read-transaction). Both return the result of the code they run.
+
+  A Graph or Model of a dataset such as TDB2 uses that dataset's
+  transactions, also under an inference graph. A plain in-memory graph has
+  none, so the code runs without one: other threads see its writes, and a
+  failure partway through doesn't undo them. The in-memory db that theo/db
+  makes has transactions unless :transactional? is false."
   (:import [java.util.concurrent ExecutionException ExecutorService Future
             RejectedExecutionException TimeUnit TimeoutException]
            [java.util.function Supplier]
@@ -20,8 +21,8 @@
            [org.apache.jena.system Txn]))
 
 (defn transactional
-  "The dataset whose transactions `x`, a Graph, Model or Dataset, uses, or
-  nil when it has none."
+  "The dataset whose transactions `x` (a Graph, Model or Dataset) uses, or
+  nil when there is none."
   ^Transactional [x]
   (cond
     (instance? Dataset x)      (when (.supportsTransactions ^Dataset x) x)
@@ -35,24 +36,24 @@
 
 ;; named after the methods of Jena's Txn that they call
 (defn calculate
-  "Call `f` in a transaction on `x` and return what it returns. The
-  transaction starts as a read and becomes a write when `f` writes. That
-  fails when another write has committed since it began, so a function
-  that writes is better off with calculate-write."
+  "Call `f` in a transaction on `x` and return its result. The transaction
+  starts as a read and becomes a write when `f` writes, which fails when
+  another write has committed in the meantime. A function that always
+  writes is better off with calculate-write."
   [x f]
   (if-let [t (transactional x)]
     (Txn/calculate t ^Supplier f)
     (f)))
 
 (defn calculate-read
-  "Call `f` in a read transaction on `x` and return what it returns."
+  "Call `f` in a read transaction on `x` and return its result."
   [x f]
   (if-let [t (transactional x)]
     (Txn/calculateRead t ^Supplier f)
     (f)))
 
 (defn calculate-write
-  "Call `f` in a write transaction on `x` and return what it returns."
+  "Call `f` in a write transaction on `x` and return its result."
   [x f]
   (if-let [t (transactional x)]
     (Txn/calculateWrite t ^Supplier f)
@@ -62,7 +63,7 @@
 (defmacro with-transaction
   "Run `body` in a transaction on `x` and return its value. The transaction
   starts as a read and becomes a write when `body` writes, as calculate's
-  does. Inside a read transaction it throws, even when `body` only reads, so
+  does. It throws inside a read transaction, even when `body` only reads, so
   code that may run in one is better off with with-read-transaction."
   [x & body]
   `(calculate ~x (fn [] ~@body)))
@@ -88,7 +89,7 @@
 
   The thread that runs `body` is left to finish, since interrupting it would
   make Java close TDB2's file channels for good. An executor with a queue
-  lets a call wait there until its timeout runs out. Only one without a
+  lets a call wait in it until the timeout runs out, and one without a
   queue rejects a call when all its threads are busy."
   [executor timeout & body]
   `(let [^ExecutorService executor# ~executor

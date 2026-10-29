@@ -31,7 +31,7 @@
                       " with " (count (:prefixes db)) " prefixes\"]")))
 
 (defn- set-prefixes!
-  "Replace the prefixes of the Model or Dataset `x` with the `prefixes`,
+  "Replace the prefixes of `x` (a Model or Dataset) with the `prefixes`,
   unless it has them already."
   [x prefixes]
   (let [mapping           (convert/ns-prefix-map prefixes)
@@ -46,19 +46,18 @@
                                   (.setNsPrefixes ^java.util.Map mapping))))))
 
 (defn db
-  "The db of `x`, a Jena Model, Dataset, Graph or DatasetGraph, with these
+  "A db of `x` (a Jena Model, Dataset, Graph or DatasetGraph) with these
   `opts`:
 
-  - :prefixes, the prefixes of the IRIs that become keywords, in the shape
-    of term/default-prefixes, which it is unless given.
-  - :transactional?, true unless given, and only for a db with no `x`.
+  - :prefixes, for the keywords that stand for IRIs (term/default-prefixes
+    when none are given). They replace the prefixes stored in `x`, and on
+    TDB2 that writes them to disk.
+  - :transactional?, only when there is no `x` (true when not given).
 
-  With no `x`, it returns the db of a new in-memory Dataset with
-  transactions. With :transactional? false, it's a plain Model instead,
-  which is faster to fill and read, but has only one graph and doesn't undo
-  a failed write. A Graph is used through a Model of it, and a DatasetGraph
-  through a Dataset, without copying. The prefixes replace those of `x`
-  where they differ, which for TDB2 writes them to disk."
+  With no `x`, the db is a new in-memory Dataset with transactions, or a
+  plain Model when :transactional? is false. A Model is faster to fill and
+  read, but it has one graph and can't undo a failed write. A Graph or
+  DatasetGraph is wrapped, not copied."
   ([]
    (db {}))
   ([x]
@@ -93,31 +92,30 @@
      (throw (ex-info (str "Not a Model, Dataset or Graph: " x) {:x x})))))
 
 (defn store
-  "The Jena store of `db`: its Dataset, or else its Model. The functions of
-  the txn namespace take it."
+  "The Dataset or Model of `db`, which the functions of the txn namespace
+  take."
   [{:keys [model dataset] :as db}]
   (or dataset model))
 
 (defn jena-graph
-  "The Jena Graph of `db`: the graph of its Model, or the default graph of
-  its Dataset."
+  "The Jena Graph of `db`: its Model's graph, or its Dataset's default
+  graph."
   ^Graph [{:keys [^Model model ^Dataset dataset] :as db}]
   (.getGraph (or model (.getDefaultModel dataset))))
 
 ;; as in Jena's DatasetGraph: getDefaultGraph, getGraph and getUnionGraph
 (defn default-graph
-  "The db of the default graph of `db`, with its prefixes. The db of a Model
-  has only that graph, so it comes back as it is."
+  "A db of the default graph of `db`, with the same prefixes, or `db` itself
+  when it's a db of a Model, which has no other graph."
   [{:keys [dataset prefixes] :as db}]
   (if dataset
     (->Db (.getDefaultModel ^Dataset dataset) nil prefixes)
     db))
 
 (defn named-graph
-  "The db of the named `graph` of `db`, with its prefixes. The graph is an
-  IRI, e.g. a keyword under the prefixes, and the first write to it adds it
-  to the Dataset. Writes to the db go into the Dataset, in its
-  transactions."
+  "A db of the named `graph` of `db`, with the same prefixes. The graph is
+  an IRI, e.g. a keyword, and the first write to it adds it to the Dataset.
+  Writes go into the Dataset, in its transactions."
   [{:keys [dataset prefixes] :as db} graph]
   (let [iri (term/iri graph prefixes)]
     (cond
@@ -132,29 +130,31 @@
                       {:graph graph})))))
 
 (defn union-graph
-  "The db of the union of the named graphs of `db`, with its prefixes. It
-  can only be read, since Jena refuses to write to it."
+  "A read-only db of the union of the named graphs in `db`, with the same
+  prefixes."
   [{:keys [dataset prefixes] :as db}]
   (if dataset
     (->Db (.getUnionModel ^Dataset dataset) nil prefixes)
     (throw (ex-info "A Model has no named graphs" {}))))
 
 (defn transact!
-  "Add `tx-data` to `db` in one write transaction, and return `db`. A db of
-  a Dataset gets it in its default graph, and a db of named-graph in that
-  graph.
+  "Add `tx-data` to `db` in one write transaction, and return `db`. It goes
+  into the default graph of a Dataset, or into the graph of a db from
+  named-graph.
 
   The data is a Jena Graph or Model, or a coll of:
 
   - [s p o] triples of Clojure values;
-  - maps of the properties of a subject, its :rdf/about or else a new blank
-    node. A set or a vector gives several values, and nil none. A nested
-    map is a subject of its own, so an entity can be written back. A
-    predicate such as :ex/_knows links the other way;
+  - maps of a subject's properties, with the subject as :rdf/about, or a
+    new blank node when there is none. A set or vector gives a property
+    several values, and nil gives it none. A nested map is a subject of its
+    own, so an entity can go back in as it is. A predicate such as
+    :ex/_knows links the other way;
   - colls of these.
 
-  It's all converted first, so an error in it leaves the db as it was. A
-  plain in-memory Model has no transactions (see the txn namespace)."
+  The data is all converted first, so an error in it leaves `db` as it
+  was. A plain in-memory Model has no transactions (see the txn
+  namespace)."
   [{:keys [prefixes] :as db} tx-data]
   (let [source (cond
                  (instance? Graph tx-data) tx-data
@@ -168,11 +168,13 @@
     db))
 
 (defn retract!
-  "Remove the triples that the `patterns` match from `db` in one write
-  transaction, and return `db`. A pattern is an [s p o] triple of Clojure
-  values in which _ matches anything, e.g. [:ex/luke :ex/age '_], and one
-  may stand alone. They're all converted first, so an error in one leaves
-  the db as it was."
+  "Remove the triples that match the `patterns` from `db` in one write
+  transaction, and return `db`.
+
+  A pattern is an [s p o] triple of Clojure values where _ matches
+  anything, e.g. [:ex/luke :ex/age '_], and a single one needs no coll. The
+  patterns are all converted first, so an error in one leaves `db` as it
+  was."
   [{:keys [prefixes] :as db} patterns]
   (let [nodes (mapv #(convert/pattern->nodes % prefixes)
                     (if (convert/triple? patterns) [patterns] patterns))]
@@ -183,19 +185,19 @@
     db))
 
 (defn read!
-  "Read the RDF file at `source`, or the files of a coll of sources, into
-  `db`, as transact! adds data, and return `db`.
+  "Read the RDF file `source` (or a coll of sources) into `db` as transact!
+  does, and return `db`.
 
-  A source is a File, a URL, a URI or a file path, and its name gives the
-  syntax, e.g. Turtle for .ttl. Every file is parsed before anything is
-  added, so a syntax error leaves the db as it was."
+  A source is a File, URL, URI or file path, and its name gives the syntax,
+  e.g. Turtle for .ttl. All the files are parsed before anything is added,
+  so a syntax error leaves `db` as it was."
   [db source]
   (transact! db (files/parse (if (sequential? source) source [source]))))
 
 (defn write
-  "Write `db` to the file `target`, a File or a path, and return `db`. A db
-  of a Dataset writes its default graph. The file name gives the syntax,
-  e.g. Turtle for .ttl, and the file has the prefixes of `db`."
+  "Write `db` to the file `target` (a File or path), and return `db`. The
+  file's name gives the syntax, e.g. Turtle for .ttl, and the file has the
+  prefixes of `db`. A db of a Dataset writes its default graph."
   [db target]
   (let [f    (io/file target)
         lang (files/syntax f)]
@@ -207,8 +209,8 @@
 ;; RDF 1.1 Turtle, section 2.8: a collection is rdf:first, rdf:rest and
 ;; rdf:nil, with no rdf:type
 (defn rdf-list
-  "The RDF list of the `items`, in the map form of transact!, or :rdf/nil
-  when there are none."
+  "An RDF list of the `items` as transact! takes it, or :rdf/nil when there
+  are none."
   [items]
   (if (seq items)
     {:rdf/first (first items)
@@ -218,31 +220,31 @@
 ;; RDF Schema 1.1, sections 5.1.2 to 5.1.5: a container's members are the
 ;; values of rdf:_1, rdf:_2 and so on
 (defn rdf-container
-  "The RDF container of the `type`, e.g. :rdf/Bag, with the `items` as its
-  members, in the map form of transact!."
+  "An RDF container of the `type` (e.g. :rdf/Bag) with the `items` as its
+  members, as transact! takes it."
   [type items]
   (into {:rdf/type type}
         (map-indexed (fn [i x] [(keyword "rdf" (str "_" (inc i))) x]))
         items))
 
 (defn rdf-bag
-  "The RDF Bag of the `items`, in the map form of transact!."
+  "An RDF Bag of the `items` as transact! takes it."
   [items]
   (rdf-container :rdf/Bag items))
 
 (defn rdf-alt
-  "The RDF Alt of the `items`, in the map form of transact!."
+  "An RDF Alt of the `items` as transact! takes it."
   [items]
   (rdf-container :rdf/Alt items))
 
 (defn rdf-seq
-  "The RDF Seq of the `items`, in the map form of transact!."
+  "An RDF Seq of the `items` as transact! takes it."
   [items]
   (rdf-container :rdf/Seq items))
 
 (defn query
   "The Jena Query of the SPARQL string `s`, parsed with the `prefixes` set
-  beforehand, default-prefixes unless given, so that `s` needs no PREFIX
+  (term/default-prefixes when none are given), so that `s` needs no PREFIX
   lines for them."
   (^Query [s]
    (query s term/default-prefixes))
@@ -261,22 +263,25 @@
 ;; TODO: a projection into a set of tuples, e.g. {:find [?s ?o]}, as
 ;; Aristotle's q/run had, if Datomic-shaped queries don't bring one
 (defn q
-  "The results of `x`, a SPARQL query as a string or a Query, on `db`, with
-  the `bindings` and these `opts`:
+  "The results of the SPARQL query `x` on `db`, with the `bindings` and
+  `opts`.
 
-  - :timeout, in milliseconds, after which Jena cancels the query when it
-    moves on to the next result. For a hard timeout, see the txn namespace.
+  The query is a Query, or a string that is parsed with the prefixes of
+  `db`. A binding gives a variable one value or several, or gives several
+  variables rows of values (with nil for unbound):
 
-  A string is parsed with the prefixes of `db`. A binding gives a variable
-  one value, e.g. {'?s :ex/a}, several values, e.g. {'?s [:ex/a :ex/b]},
-  or gives several variables rows of values, e.g.
-  {'[?s ?o] [[:ex/a nil] [:ex/b \"x\"]]}, with nil for unbound. The values
-  go in as RDF terms, never as SPARQL text.
+      {'?s :ex/a}
+      {'?s [:ex/a :ex/b]}
+      {'[?s ?o] [[:ex/a nil] [:ex/b \"x\"]]}
 
-  A SELECT returns a vector of maps of variable to value, and an ASK a
-  boolean. A CONSTRUCT or DESCRIBE returns a new db of an in-memory Model
-  of the triples, with the prefixes of `db`. The query runs in a read
-  transaction."
+  The values go in as RDF terms, never as SPARQL text. A SELECT returns a
+  vector of maps of variable to value, an ASK a boolean, and a CONSTRUCT
+  or DESCRIBE a new in-memory db of the triples, with the prefixes of
+  `db`. The query runs in one read transaction.
+
+  The only option is :timeout, in milliseconds. Jena only checks it when
+  the query moves on to its next result, so for a hard timeout, see the
+  txn namespace."
   ([db x]
    (q db x nil nil))
   ([db x bindings]
@@ -305,15 +310,13 @@
 ;; reducible rather than lazy, as next.jdbc's plan is, since a lazy seq
 ;; could be read after the transaction or on another thread
 (defn reducible
-  "The rows of the SPARQL SELECT `x`, a string or a Query, on `db` with the
-  `bindings` and `opts` of q, as a reducible that runs the query when you
-  reduce it, e.g. with reduce, into, transduce or run!.
+  "A reducible of the rows of the SELECT `x` on `db`, with the `bindings`
+  and `opts` of q. It runs the query each time you reduce it.
 
-  It hands the rows to the reducing function one at a time, in a read
-  transaction that ends with the reduction, also when it stops early or
-  throws, so only what the reduction keeps stays in memory. Each reduction
-  runs the query again, and since it isn't a collection, first, count and
-  seq don't work on it."
+  The rows go to the reducing function one at a time, in a read
+  transaction that lasts as long as the reduction, so only what the
+  reduction keeps stays in memory. Use it with reduce, into, transduce or
+  run!, since first, count and seq don't work on it."
   ([db x]
    (reducible db x nil nil))
   ([db x bindings]
@@ -334,7 +337,7 @@
 
 (defn update-request
   "The Jena UpdateRequest of the SPARQL Update string `s`, parsed with the
-  `prefixes` set beforehand, default-prefixes unless given, so that `s`
+  `prefixes` set (term/default-prefixes when none are given), so that `s`
   needs no PREFIX lines for them."
   (^UpdateRequest [s]
    (update-request s term/default-prefixes))
@@ -344,12 +347,12 @@
      (UpdateFactory/parse ^String s))))
 
 (defn update!
-  "Run the SPARQL Update `x`, a string or an UpdateRequest, on `db` with the
-  `bindings` in one write transaction, and return `db`.
+  "Run the SPARQL Update `x` on `db` with the `bindings` in one write
+  transaction, and return `db`.
 
-  A string is parsed with the prefixes of `db`. A binding gives a variable
-  one value, e.g. {'?s :ex/luke}, which goes in as an RDF term, never as
-  SPARQL text."
+  The update is an UpdateRequest, or a string that is parsed with the
+  prefixes of `db`. A binding gives a variable one value, e.g.
+  {'?s :ex/luke}, which goes in as an RDF term, never as SPARQL text."
   ([db x]
    (update! db x nil))
   ([{:keys [prefixes] :as db} x bindings]
@@ -361,8 +364,8 @@
 ;; as TDB2's QueryEngineTDB checks it, with the context of the dataset over
 ;; the global one
 (defn- union-default-graph?
-  "Whether a query on the DatasetGraph `dsg` matches the union of its named
-  graphs in place of its default graph, as TDB2 does when its context says
+  "Whether a query on the DatasetGraph `dsg` reads the union of its named
+  graphs instead of its default graph, as TDB2 does when its context says
   so."
   [^DatasetGraph dsg]
   (and (DatabaseMgr/isTDB2 dsg)
@@ -378,9 +381,9 @@
 ;; SPARQL query for each subject, so they have to read the graph that q
 ;; reads, and for TDB2 that can be the union graph rather than the default
 (defn- query-graph
-  "The Graph whose triples a query on `db` matches: the graph of its Model,
-  or else the default graph of its Dataset, or the union of its named graphs
-  when TDB2 makes that the default."
+  "The Graph that a query on `db` reads: its Model's graph, its Dataset's
+  default graph, or the union of the named graphs when TDB2 makes that the
+  default."
   ^Graph [{:keys [^Model model ^Dataset dataset]}]
   (if dataset
     (let [dsg (.asDatasetGraph dataset)]
@@ -390,8 +393,8 @@
     (.getGraph model)))
 
 (defn- property-pairs
-  "The predicate and object of each of the Jena `triples`, as q returns
-  values, with IRIs under `prefixes` as keywords."
+  "The predicate and object of each of the Jena `triples` as Clojure
+  values, with `prefixes` for keywords."
   [triples prefixes]
   (into []
         (map (fn [^Triple t]
@@ -400,8 +403,8 @@
         triples))
 
 (defn- inferred
-  "The property map of the Jena `triples` of a subject in `db`, a db of an
-  inference Model, that are in neither its raw graph nor its schema."
+  "The property map of a subject's Jena `triples` that the inference Model
+  of `db` infers, rather than finds in its raw graph or schema."
   [{:keys [^Model model prefixes] :as db} triples]
   (let [^BaseInfGraph g (.getGraph model)
         asserted        (keep identity [(.getRawGraph g) (.getSchemaGraph g)])
@@ -412,15 +415,15 @@
 ;; TODO: an option for one value or a set by a schema, as in Datomic, e.g.
 ;; SHACL's sh:maxCount 1 or owl:FunctionalProperty, instead of by the data
 (defn entity
-  "The properties of `subject` in `db` as a map of predicate to value, or to
-  a set of values when it has several, with :rdf/about for the subject, or
-  nil when it has none.
+  "A map of the properties of `subject` in `db`, with :rdf/about for the
+  subject, or nil when it has none. A property has one value, or a set when
+  it has several.
 
-  A blank node among the values becomes a map of its own properties and its
-  :rdf/about, and so on, as in a Concise Bounded Description, so the entity
-  can go back into transact! as it is. For a db of an inference Model, the
-  metadata of the entity has the :inferred properties: those in neither the
-  raw graph nor the schema. The entity is read in one read transaction."
+  A blank node among the values becomes a map of its own properties, as in
+  a Concise Bounded Description, so the entity can go back into transact!
+  as it is. For a db of an inference Model, the :inferred metadata has the
+  properties that the Model infers (those in neither its raw graph nor its
+  schema). The entity is read in one read transaction."
   [{:keys [^Model model prefixes] :as db} subject]
   (txn/calculate-read
     (store db)
@@ -439,9 +442,8 @@
            (with-meta {:inferred (inferred db ts)}))))))
 
 (defn- links-to
-  "The subjects that link to `subject` in the Graph `g` by the predicate
-  `p`, as one value or a set of them, or nil when there are none, with
-  values under `prefixes`."
+  "The subjects in the Graph `g` that link to `subject` by the predicate `p`
+  (one, a set, or nil for none), with `prefixes` for keywords."
   [^Graph g p subject prefixes]
   (entity/property-value
     (map #(convert/data (.getSubject ^Triple %) prefixes)
@@ -451,22 +453,23 @@
                          (convert/node subject prefixes))))))
 
 (defn pull
-  "The properties of `subject` in `db` that the `pattern` selects, in the
-  style of Datomic's pull, with :rdf/about for the subject, or nil when it
-  has no properties and the pattern selects no links to it. The pattern is
-  a vector of:
+  "The properties of `subject` in `db` that the `pattern` selects, as in
+  Datomic's pull, with :rdf/about for the subject. It returns nil when the
+  subject has no properties and the pattern selects no links to it.
 
-  - a predicate, e.g. :rdfs/label, for its values;
-  - a predicate such as :ex/_knows, as in transact!, for the subjects that
-    link to this one by :ex/knows;
+  The pattern is a vector of:
+
+  - a predicate, e.g. :rdfs/label;
+  - a reverse predicate such as :ex/_knows, for the subjects that link to
+    this one by :ex/knows;
   - '*, for every predicate;
-  - a map of predicate to what to pull from its values: a pattern of its
+  - a map of a predicate to what to pull from its values: a pattern of its
     own, e.g. {:ex/friend [:ex/name]}, '... for this pattern again at any
     depth, or a number for this pattern again at most that many times.
 
-  A predicate has its value, or a set of values when it has several. A
-  recursion stops at a subject that it has already pulled on its way. The
-  pull is read in one read transaction."
+  A property has one value, or a set when it has several. A recursion stops
+  at a subject that it has already pulled on the way. The pull is read in
+  one read transaction."
   [{:keys [prefixes] :as db} pattern subject]
   (txn/calculate-read
     (store db)

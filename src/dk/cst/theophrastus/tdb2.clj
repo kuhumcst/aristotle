@@ -7,16 +7,16 @@
            [org.apache.jena.tdb2 DatabaseMgr TDB2Factory]))
 
 (defn connect
-  "The db of the TDB2 database in the directory `dir`, which TDB2 creates
-  when it doesn't exist, with the `opts` of theophrastus/db."
+  "A db of the TDB2 database in the directory `dir`, with the `opts` of
+  theo/db. TDB2 creates the database when the directory doesn't exist."
   ([dir]
    (connect dir nil))
   ([dir opts]
    (theo/db (TDB2Factory/connectDataset (str dir)) opts)))
 
 (defn compact!
-  "Compact the TDB2 database of `db`, which may be a view of one of its
-  graphs, and delete the generation it replaces. TDB2 only frees the space
+  "Compact the TDB2 database of `db` (which may be a view of one of its
+  graphs), and delete the generation it replaces. TDB2 only frees the space
   of deleted and changed data when it compacts."
   [db]
   (let [t   (txn/transactional (theo/store db))

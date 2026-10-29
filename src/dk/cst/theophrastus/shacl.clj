@@ -12,8 +12,8 @@
            [org.apache.jena.sparql.path P_Link Path]))
 
 (defn parse
-  "The Jena Shapes of `x`: a Graph, a Model, a db, or the file of a source,
-  or files of a coll of sources, as for theophrastus/read!."
+  "The Jena Shapes in `x`: a Graph, a Model, a db, or a source or coll of
+  sources (as theo/read! takes them)."
   ^Shapes [x]
   (let [^Graph g (cond
                    (instance? Graph x) x
@@ -25,7 +25,7 @@
     (Shapes/parse g)))
 
 (defn- entry->map
-  "The map of the report entry `e`, with values under `prefixes`."
+  "The map of the report entry `e`, with `prefixes` for keywords."
   [^ReportEntry e prefixes]
   (let [value #(some-> ^Node % (convert/data prefixes))]
     {:focus-node (value (.focusNode e))
@@ -43,18 +43,18 @@
 ;; with its focus node, path, value, source shape, constraint component and
 ;; severity
 (defn- report->map
-  "The map of the validation `report`, with values under `prefixes`."
+  "The map of the validation `report`, with `prefixes` for keywords."
   [^ValidationReport report prefixes]
   {:conforms? (.conforms report)
    :entries   (mapv #(entry->map % prefixes) (.getEntries report))})
 
 (defn validate
-  "The SHACL report of `db` against the `shapes`, or only of its `node`, as
-  {:conforms? boolean, :entries [...]} in a read transaction.
+  "The SHACL report of `db` (or only of its `node`) against the `shapes`, as
+  a map of :conforms? and :entries. It's made in one read transaction.
 
   Each entry is a map of :focus-node, :path, :value, :shape, :constraint,
-  :message and :severity, with values under the prefixes of `db` and sh for
-  SHACL, e.g. :sh/Violation. A path that isn't a single predicate is a
+  :message and :severity. Its keywords use the prefixes of `db`, and sh
+  for SHACL, e.g. :sh/Violation. A path that isn't a single predicate is a
   string of SPARQL syntax."
   ([db shapes]
    (validate db shapes nil))

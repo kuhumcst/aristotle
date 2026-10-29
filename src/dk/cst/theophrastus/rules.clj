@@ -1,9 +1,9 @@
 (ns dk.cst.theophrastus.rules
-  "Jena's rule reasoner: rules, a reasoner of them, and an inference Model.
+  "Jena's rule reasoner: parse rules, make a reasoner of them, and make an
+  inference Model with it.
 
-  Pass the inference Model to theophrastus/db, and an entity of the db
-  then has the properties that the rules infer as :inferred in its
-  metadata.
+  Pass the inference Model to theo/db, and an entity of the db has the
+  properties that the rules infer as :inferred in its metadata.
 
   See https://jena.apache.org/documentation/inference/"
   (:import [java.util List]
@@ -13,8 +13,8 @@
             RuleReasoner]))
 
 (defn parse
-  "The vector of the Jena rules of `x`: a string of rule text, or a File,
-  URL or resource with rule text in it."
+  "The Jena rules in `x` (a string of rule text, or a File, URL or resource
+  with rule text in it), as a vector."
   [x]
   (let [^String text (if (string? x) x (slurp x))]
     (vec (Rule/parseRules text))))
@@ -27,12 +27,12 @@
    :backward     GenericRuleReasoner/BACKWARD})
 
 (defn reasoner
-  "The GenericRuleReasoner of the `rules`, with these `opts`:
+  "A GenericRuleReasoner of the `rules`, with these `opts`:
 
-  - :mode, one of the keys of modes, :hybrid unless given;
+  - :mode, a key of modes (:hybrid when not given);
   - :transitive-closure-caching?, to cache the closures of
-    rdfs:subClassOf and rdfs:subPropertyOf, false unless given;
-  - :owl-translation?, for the OWL rules, false unless given."
+    rdfs:subClassOf and rdfs:subPropertyOf (false when not given);
+  - :owl-translation?, for the OWL rules (false when not given)."
   ([rules]
    (reasoner rules nil))
   ([rules {:keys [mode transitive-closure-caching? owl-translation?]
@@ -45,7 +45,7 @@
      (.setOWLTranslation (boolean owl-translation?)))))
 
 (defn inf-model
-  "The inference Model of the `reasoner` over the `data`, a Model, with the
+  "An inference Model of the `reasoner` over the `data` Model, with the
   `schema` Model when given."
   (^InfModel [^Reasoner reasoner ^Model data]
    (ModelFactory/createInfModel reasoner data))
@@ -53,11 +53,11 @@
    (ModelFactory/createInfModel reasoner schema data)))
 
 (def owl-rules
-  "The vector of the largest set of OWL rules that Jena supports."
+  "The largest set of OWL rules that Jena supports, as a vector."
   (vec (.getRules ^RuleReasoner (ReasonerRegistry/getOWLReasoner))))
 
 (def mini-rules
-  "The vector of the OWL rules of Jena's mini reasoner."
+  "The OWL rules of Jena's mini reasoner, as a vector."
   (vec (.getRules ^RuleReasoner (ReasonerRegistry/getOWLMiniReasoner))))
 
 (def table-all

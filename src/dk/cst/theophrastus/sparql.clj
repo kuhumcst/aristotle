@@ -1,6 +1,6 @@
 (ns dk.cst.theophrastus.sparql
-  "SPARQL on a db with Jena's own API, as theophrastus/q, reducible and
-  update! run it."
+  "The parts of theo/q, theo/reducible and theo/update!, for running SPARQL
+  on a db with Jena's own API."
   (:require [dk.cst.theophrastus.convert :as convert])
   (:import [java.util.concurrent TimeUnit]
            [org.apache.jena.graph Node]
@@ -21,8 +21,8 @@
     (throw (ex-info (str "Not a variable: " (pr-str sym)) {:variable sym}))))
 
 (defn- values->binding
-  "The Jena Binding of the Vars `vars` to the `values`, with values under
-  `prefixes`, and nil for unbound."
+  "The Jena Binding of the Vars `vars` to the `values`, with nil for unbound
+  and `prefixes` for keywords."
   ^Binding [vars values prefixes]
   (let [b (BindingFactory/builder)]
     (doseq [[^Var v x] (map vector vars values)
@@ -31,8 +31,8 @@
     (.build b)))
 
 (defn- inline-data
-  "The VALUES block of the variables `vars` with the `rows` of values, with
-  values under `prefixes`, and nil for unbound."
+  "The VALUES block of the variables `vars` and the `rows` of their values,
+  with nil for unbound and `prefixes` for keywords."
   ^ElementData [vars rows prefixes]
   (let [vars (mapv variable vars)
         data (ElementData.)]
@@ -46,9 +46,9 @@
 ;; the WHERE clause joins with the rest, as initial bindings did, and keeps
 ;; the bound variables in the results, which a substitution doesn't
 (defn bind
-  "The copy of `query` with the `bindings` of theophrastus/q at the start of
-  its WHERE clause, with values under `prefixes`, or `query` itself when
-  there are none."
+  "A copy of `query` with the `bindings` in a VALUES block at the start of
+  its WHERE clause, or `query` itself when there are none. The bindings are
+  those of theo/q, with `prefixes` for keywords."
   ^Query [^Query query bindings prefixes]
   (if (empty? bindings)
     query
@@ -70,9 +70,9 @@
       q)))
 
 (defn query-exec-builder
-  "The QueryExecBuilder that runs `query` on `db`, with the prefixes of `db`
-  in its context, for the SPARQL functions of the function namespace, and
-  the `opts` of theophrastus/q."
+  "The QueryExecBuilder that runs `query` on `db` with the `opts` of theo/q.
+  Its context has the prefixes of `db`, for the SPARQL functions of the
+  function namespace."
   ^QueryExecBuilder [{:keys [^Model model ^Dataset dataset prefixes]}
                      ^Query query
                      {:keys [timeout]}]
@@ -84,8 +84,8 @@
     timeout (.timeout (long timeout) TimeUnit/MILLISECONDS)))
 
 (defn row
-  "The Binding `b` as a map of variable to value, as theophrastus/q returns
-  it, with IRIs under `prefixes` as keywords."
+  "The Binding `b` as a map of variable to value, as theo/q returns it, with
+  `prefixes` for keywords."
   [^Binding b prefixes]
   ;; a loop over the Iterator, since iterator-seq allocates a chunk of 32
   ;; for each row
@@ -99,8 +99,8 @@
         (persistent! m)))))
 
 (defn reduce-rows
-  "Reduce the `rows`, a RowSet, with `f` from `init`, as reduce does, one
-  row at a time, with values under `prefixes`."
+  "Reduce the RowSet `rows` with `f` from `init`, as reduce does, one row at
+  a time, with `prefixes` for keywords."
   [f init ^RowSet rows prefixes]
   ;; a loop rather than a reduce over iterator-seq, which reads rows 32 at a
   ;; time, past the point where a reduction stops
@@ -111,8 +111,8 @@
       acc)))
 
 (defn- substitute
-  "The builder `b` with the variable `k` bound to the value `v`, under
-  `prefixes`."
+  "The builder `b`, with the value `v` in place of the variable `k` and
+  `prefixes` for keywords."
   ^UpdateExecBuilder [^UpdateExecBuilder b k v prefixes]
   (if (or (sequential? v) (set? v))
     (throw (ex-info (str "Not a variable with one value: " k)
@@ -121,8 +121,8 @@
 
 (defn update-exec-builder
   "The UpdateExecBuilder that runs the UpdateRequest `request` on `db`, with
-  each variable of the `bindings` of theophrastus/update! replaced by its
-  value."
+  the values of the `bindings` (as theo/update! takes them) in place of
+  their variables."
   ^UpdateExecBuilder [{:keys [^Model model ^Dataset dataset prefixes]}
                       ^UpdateRequest request
                       bindings]

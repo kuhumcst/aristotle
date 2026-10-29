@@ -11,8 +11,9 @@
       #rdf/langstring [\"hund\" \"da\"]
       #rdf/literal [\"1.50\" \"<http://www.w3.org/2001/XMLSchema#decimal>\"]
 
-  The function value turns a Literal into a type of the platform where one
-  holds it exactly, and literal turns such a value back into a Literal."
+  The value function turns a Literal into a native value when a type of the
+  platform holds it exactly, and the literal function turns that value back
+  into a Literal."
   (:require [clojure.string :as str])
   #?(:clj (:import [java.time Duration Instant LocalDate LocalDateTime LocalTime
                     MonthDay OffsetDateTime OffsetTime Period Year YearMonth
@@ -20,8 +21,8 @@
                    [java.time.format DateTimeFormatter])))
 
 (def default-prefixes
-  "The prefixes used when none are given: each prefix as a keyword, mapped
-  to its namespace IRI in angle brackets, as in Flint's :prefixes."
+  "The prefixes to use when none are given. Like Flint's :prefixes, it maps
+  each prefix (a keyword) to its namespace IRI in angle brackets."
   {:rdf  "<http://www.w3.org/1999/02/22-rdf-syntax-ns#>"
    :rdfs "<http://www.w3.org/2000/01/rdf-schema#>"
    :xsd  "<http://www.w3.org/2001/XMLSchema#>"
@@ -42,7 +43,7 @@
        (some? (re-matches iri-re x))))
 
 (defn blank-node?
-  "Whether `x` is a blank node, a symbol such as _b1."
+  "Whether `x` is a blank node: a symbol such as _b1."
   [x]
   (and (symbol? x)
        (nil? (namespace x))
@@ -50,22 +51,23 @@
 
 (defprotocol AsIri
   "A value that stands for an IRI. Extend it only to a type that keeps the
-  IRI exactly as written. java.net.URL, js/URL and goog.Uri all change
-  some IRIs, e.g. by lower-casing the scheme or percent-encoding Æ."
+  IRI exactly as written, which rules out java.net.URL, js/URL and
+  goog.Uri: they change some IRIs, e.g. by lower-casing the scheme or
+  percent-encoding Æ."
   (as-iri [x prefixes]
     "The IRI that `x` stands for, as iri returns it."))
 
 (defn iri
   "The IRI that `x` stands for, without angle brackets, or nil when there is
-  none. A keyword's prefix is looked up in `prefixes`, a map in the shape of
+  none. A keyword's prefix is looked up in `prefixes`, a map like
   default-prefixes."
   [x prefixes]
   (as-iri x prefixes))
 
 (def namespace-iris
-  "The namespace IRI of each prefix of `prefixes`, without angle brackets,
-  by the name of the prefix. It's memoized, since a db looks up every
-  keyword with the same prefixes."
+  "A map of the name of each prefix in `prefixes` to its namespace IRI,
+  without angle brackets. It's memoized, since a db looks up every keyword
+  with the same prefixes."
   (memoize
     (fn [prefixes]
       (into {}
@@ -154,7 +156,8 @@
      (print-method [(.-s x) (.-lang x)] writer)))
 
 (defn read-langstring
-  "The LangString of the vector `form`, [s lang], for the tag #rdf/langstring."
+  "The LangString of the [s lang] vector `form`, for the #rdf/langstring
+  tag."
   [[s lang :as form]]
   (->LangString s lang))
 
@@ -200,20 +203,19 @@
      (print-method [(.-s x) (.-datatype x)] writer)))
 
 (defn read-literal
-  "The Literal of the vector `form`, [s datatype], for the tag #rdf/literal."
+  "The Literal of the [s datatype] vector `form`, for the #rdf/literal tag."
   [[s datatype :as form]]
   (->Literal s datatype))
 
 (defprotocol AsLiteral
-  "A value that has a Literal: the inverse of value."
+  "A value that has a Literal, such as the values that value returns."
   (as-literal [x]
-    "The Literal of the value `x`, or an exception when it has none."))
+    "The Literal of the value `x`. It throws when `x` has none."))
 
 (defn literal
   "The Literal of the value `x`, or of the lexical form `s` with the
-  datatype `dt`. The datatype is a keyword or an IRI in angle brackets, and
-  a keyword's prefix is looked up in `prefixes`, default-prefixes unless
-  given.
+  datatype `dt`. The datatype is an IRI in angle brackets or a keyword,
+  with `prefixes` for keywords (default-prefixes when none are given).
 
       (literal \"<urn:isbn:123>\")
       ;; => #rdf/literal [\"<urn:isbn:123>\"
@@ -234,8 +236,8 @@
 
 ;; XSD 1.1 Part 2, sections 3.4.13 to 3.4.25
 (def integer-bounds
-  "The smallest and largest value of xsd:integer and each type derived from
-  it, by local name, with nil for no bound."
+  "The smallest and largest value of xsd:integer and of each type derived
+  from it, by local name, with nil where there is no bound."
   {"integer"            [nil nil]
    "nonPositiveInteger" [nil 0]
    "negativeInteger"    [nil -1]
@@ -256,8 +258,8 @@
 ;; (integer) and 3.4.26.1 to 3.4.28.1 (yearMonthDuration, dayTimeDuration
 ;; and dateTimeStamp), built from the fragments they share
 (def xsd-lexical-spaces
-  "The lexical space of each XSD datatype that value knows, as a regular
-  expression, by the datatype's local name."
+  "The lexical space of each XSD datatype that value reads, as a regex, by
+  local name."
   (let [year     "-?([1-9][0-9]{3,}|0[0-9]{3})"
         month    "(0[1-9]|1[0-2])"
         day      "(0[1-9]|[12][0-9]|3[01])"
@@ -288,18 +290,17 @@
       re-pattern)))
 
 (defmulti value
-  "The value of the Literal `x` as a type of the platform, or `x` itself
-  when no type there holds it exactly or its lexical form isn't valid. A
-  value that isn't a Literal comes back as it is.
+  "The value of the Literal `x` as a native type, or `x` itself when no type
+  holds it exactly or its lexical form isn't valid. Any other value is
+  returned unchanged.
 
-  On both platforms, xsd:boolean, xsd:double, xsd:float, and xsd:integer
-  with the types derived from it become booleans and numbers. In
-  ClojureScript, an integer past the largest safe integer stays a Literal.
-  On the JVM, an xsd:decimal also becomes a BigDecimal, and the XSD date,
-  time and duration types become java.time values, e.g. an xsd:dateTime
-  with a time zone an OffsetDateTime and one without a LocalDateTime. In
-  ClojureScript, no type holds these exactly. For a datatype of your own,
-  add a method for its IRI in angle brackets."
+  On both platforms, xsd:boolean, xsd:double, xsd:float and the integer
+  types become booleans and numbers, but in ClojureScript an integer past
+  the largest safe integer stays a Literal. On the JVM, xsd:decimal also
+  becomes a BigDecimal, and the date, time and duration types become
+  java.time values, e.g. an xsd:dateTime with a time zone becomes an
+  OffsetDateTime. For a datatype of your own, add a method for its IRI in
+  angle brackets."
   (fn [x]
     (when (instance? Literal x)
       (datatype x))))
@@ -309,10 +310,10 @@
   x)
 
 (def native-values
-  "The function that reads a valid lexical form of each XSD datatype whose
-  values are native on both platforms, by local name. It returns nil for
-  an integer out of the type's bounds, or past the largest safe integer in
-  ClojureScript."
+  "The parse function of each XSD datatype whose values are native on both
+  platforms, by local name. It takes a valid lexical form, and returns nil
+  for an integer outside the type's bounds (or past the largest safe
+  integer in ClojureScript)."
   (let [special {"INF" ##Inf "+INF" ##Inf "-INF" ##-Inf "NaN" ##NaN}
         integer (fn [[lo hi]]
                   (fn [s]
@@ -337,16 +338,16 @@
                       #?(:clj (Float/parseFloat %) :cljs (js/Number %)))})))
 
 (def native-datatypes
-  "The IRIs, in angle brackets, of the datatypes whose values are native on
-  both platforms. A query returns their values, not Literals."
+  "The IRIs (in angle brackets) of the datatypes whose values are native on
+  both platforms, which a query returns as values rather than Literals."
   (set (map #(str "<http://www.w3.org/2001/XMLSchema#" % ">")
             (keys native-values))))
 
 #?(:clj
    (def xsd-values
-     "The function that reads a valid lexical form of each XSD datatype that
-     value converts on the JVM, by local name. It returns nil when no type
-     holds the value, e.g. for a date with a time zone."
+     "The parse function of each XSD datatype that value converts only on
+     the JVM, by local name. It takes a valid lexical form, and returns nil
+     when no type holds the value, e.g. for a date with a time zone."
      (let [tz? #(re-find #"(Z|[+-][0-9]{2}:[0-9]{2})$" %)]
        {"decimal"           #(BigDecimal. ^String %)
         "dateTime"          #(if (tz? %)
@@ -407,9 +408,10 @@
 
 #?(:clj
    (def java-time-datatypes
-     "The XSD datatype of each java.time class that value returns, and the
-     ISO 8601 form of its values. That form is the XSD lexical form, apart
-     from the plus sign that ISO 8601 puts before a year past 9999."
+     "The XSD datatype of each java.time class that value returns, with a
+     function for the ISO 8601 form of its values. That form is the XSD
+     lexical form, except for the plus sign that ISO 8601 puts before a year
+     past 9999."
      {LocalDate      [:xsd/date str]
       LocalDateTime  [:xsd/dateTime
                       #(.format DateTimeFormatter/ISO_LOCAL_DATE_TIME
