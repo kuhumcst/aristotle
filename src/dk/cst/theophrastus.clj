@@ -405,14 +405,21 @@
         triples))
 
 (defn- inferred
-  "The property map of a subject's Jena `triples` that the inference Model
-  of `db` infers, rather than finds in its raw graph or schema."
-  [{:keys [^Model model prefixes] :as db} triples]
+  "The property map of the `pairs` of a subject's Jena `triples` (in the same
+  order) that the inference Model of `db` infers, rather than finds in its
+  raw graph or schema."
+  [{:keys [^Model model] :as db} triples pairs]
+  ;; one find per asserted graph, as a Graph.contains call per triple is slow
+  ;; for a subject with many triples
   (let [^BaseInfGraph g (.getGraph model)
-        asserted        (keep identity [(.getRawGraph g) (.getSchemaGraph g)])
-        asserted?       (fn [t]
-                          (some #(.contains ^Graph % ^Triple t) asserted))]
-    (entity/property-map (property-pairs (remove asserted? triples) prefixes))))
+        s               (.getSubject ^Triple (first triples))
+        triples-of      (fn [^Graph a] (.toList (.find a s Node/ANY Node/ANY)))
+        asserted        (->> [(.getRawGraph g) (.getSchemaGraph g)]
+                             (keep identity)
+                             (into #{} (mapcat triples-of)))]
+    (->> (map (fn [t pair] (when-not (asserted t) pair)) triples pairs)
+         (remove nil?)
+         (entity/property-map))))
 
 ;; TODO: an option for one value or a set by a schema, as in Datomic, e.g.
 ;; SHACL's sh:maxCount 1 or owl:FunctionalProperty, instead of by the data
@@ -436,12 +443,11 @@
                                       Node/ANY)))
            pairs-of (fn [s] (property-pairs (triples s) prefixes))]
        (when-let [ts (not-empty (triples subject))]
-         (cond-> (assoc (entity/describe pairs-of
-                                         (property-pairs ts prefixes)
-                                         #{subject})
-                   :rdf/about subject)
-           (and model (instance? BaseInfGraph (.getGraph model)))
-           (with-meta {:inferred (inferred db ts)}))))))
+         (let [pairs (property-pairs ts prefixes)]
+           (cond-> (assoc (entity/describe pairs-of pairs #{subject})
+                     :rdf/about subject)
+             (and model (instance? BaseInfGraph (.getGraph model)))
+             (with-meta {:inferred (inferred db ts pairs)})))))))
 
 (defn- links-to
   "The subjects in the Graph `g` that link to `subject` by the predicate `p`
