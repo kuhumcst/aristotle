@@ -451,13 +451,14 @@
   [{:keys [^Model model prefixes] :as db} subject]
   (txn/calculate-read
     (store db)
-    #(let [g        (query-graph db)
-           triples  (fn [s]
-                      (.toList (.find g (convert/node s prefixes)
-                                      Node/ANY
-                                      Node/ANY)))
-           pairs-of (fn [s] (property-pairs (triples s) prefixes))]
-       (when-let [ts (not-empty (triples subject))]
+    #(let [g               (query-graph db)
+           subject-triples (fn [s]
+                             (.toList (.find g (convert/node s prefixes)
+                                             Node/ANY
+                                             Node/ANY)))
+           pairs-of        (fn [s]
+                             (property-pairs (subject-triples s) prefixes))]
+       (when-let [ts (not-empty (subject-triples subject))]
          (let [pairs (property-pairs ts prefixes)]
            (cond-> (assoc (entity/describe pairs-of pairs #{subject})
                      :rdf/about subject)
