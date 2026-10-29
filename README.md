@@ -23,6 +23,8 @@ see [From Aristotle](doc/from-aristotle.md) for what changed, and
   them, e.g. in TDB2, and you can group several writes in one.
 - **Rules, functions and SHACL.** Build an inference Model from Jena rules,
   call Clojure functions from SPARQL, and get SHACL reports as data.
+- **A SPARQL endpoint.** Serve a db by the SPARQL 1.1 Protocol, from Ring
+  or Pedestal, in steps that you can also call or replace one by one.
 - **Close to the standards.** Where RDF, SPARQL or XSD has a rule, the code
   follows it and cites it.
 
@@ -426,6 +428,133 @@ data, with the same values as a query and the sh prefix for SHACL's terms:
 ;; => {:focus-node :ex/alice :path :ex/age :severity :sh/Violation}
 ```
 
+SPARQL endpoint
+---------------
+
+To serve a db as a read-only SPARQL endpoint, as the
+[SPARQL 1.1 Protocol](https://www.w3.org/TR/sparql11-protocol/) defines
+it, make a Ring handler:
+
+```clojure
+(require '[dk.cst.theophrastus.endpoint.ring :as endpoint.ring])
+
+(def sparql
+  (endpoint.ring/handler {:db db :limit 1000}))
+
+(-> (sparql {:request-method :get
+             :headers        {"accept" "text/csv"}
+             :query-string   "query=SELECT%20%3Fname%20%7B%20%3Fp%20rdfs%3Alabel%20%3Fname%20%7D"})
+    (update :body slurp))
+;; => {:status  200
+;;     :headers {"Content-Type"            "text/csv;charset=utf-8"
+;;               "Vary"                    "Accept"
+;;               "X-Content-Type-Options"  "nosniff"
+;;               "Content-Security-Policy" "default-src 'none'; sandbox"}
+;;     :body    "name\r\nAlice\r\nCarol\r\nBob\r\n"}
+```
+
+It reads the query from a GET, a form in a POST, or the body of a POST or
+QUERY of the type application/sparql-query. The client picks the format by
+Accept or e.g. ?format=csv, and gets the result as bytes:
+
+- SPARQL results in JSON, XML, CSV or TSV for a SELECT, and in JSON or XML
+  for an ASK
+- Turtle, N-Triples, RDF/XML or JSON-LD for a CONSTRUCT or DESCRIBE
+
+A GET with no query gets the
+[service description](https://www.w3.org/TR/sparql11-service-description/)
+of the endpoint. The graphs that a request names with default-graph-uri and
+named-graph-uri, or with FROM and FROM NAMED, make up the dataset, as in
+Fuseki. A request that breaks the protocol or the policy gets a 4xx with
+the reason as plain text.
+
+The options hold the policy, and replace those of `endpoint/defaults` one
+by one. Beside :db, which can also be a function of the request that
+returns a db, these are the ones you'll most often want:
+
+- :limit, the most results that a query may return
+- :timeout, the most milliseconds that a query may run, 30 seconds by
+  default. A client can ask for fewer with ?timeout= in seconds, as in
+  Fuseki.
+- :executor, a thread pool that runs the queries, so that the timeout holds
+  even where Jena doesn't check it, e.g. in a rule reasoner. A pool with no
+  queue turns down queries when it's busy.
+- :max-bytes, the most that the body of a request may hold, 1 MB by
+  default. A larger body gets a 413 before the endpoint reads it all.
+- :forms, the forms of query that may run, e.g. #{:select :ask}
+- :endpoint, the endpoint's IRI, for when the server sits behind a proxy
+
+The handler throws at once when an option has a value of the wrong kind.
+The docstring of `endpoint/handle` lists every option, e.g. :error for a
+response of your own to a bad request.
+
+For Pedestal, put the interceptors in a route:
+
+```clojure
+(require '[dk.cst.theophrastus.endpoint.pedestal :as endpoint.pedestal])
+
+(def routes
+  #{["/sparql" :any (endpoint.pedestal/interceptors config)
+     :route-name ::sparql]})
+```
+
+The interceptors are maps, so the library doesn't depend on Pedestal.
+There's one for each step of the endpoint, each of which takes and returns
+data, so you can call them yourself:
+
+```clojure
+(require '[dk.cst.theophrastus.endpoint :as endpoint])
+
+(-> (endpoint/operation request)
+    (endpoint/prepare {:prefixes prefixes :forms #{:select :ask}})
+    (endpoint/run db {:timeout 30000}))
+;; => {:query             "ASK { ex:alice ex:knows ex:bob }"
+;;     :default-graph-uri []
+;;     :named-graph-uri   []
+;;     :params            {}
+;;     :sparql            #object[org.apache.jena.query.Query ...]
+;;     :form              :ask
+;;     :result            true}
+```
+
+A step passes on a map that has an :error as it is, so the steps thread.
+To change one step, replace its interceptor with your own, e.g. a run that
+caches results, or a respond that shows them as HTML. Such a step can still
+write a result with `endpoint/write`, or make the response with
+`endpoint/respond`.
+
+These are the choices that the standards leave open:
+
+- **SERVICE and java: IRIs are off**, since SERVICE makes the server send
+  a request wherever the query says, and Jena loads whatever class a java:
+  IRI names, also when it isn't a function. Turn them on with :service?
+  true and :java? true.
+- **Every response has the headers of `endpoint/safety`**, which tell a
+  browser not to sniff the type of the body or run anything in it, since
+  the bodies are data that clients may have written.
+- **Without Accept**, results are in JSON, where Fuseki uses XML, and
+  graphs in Turtle.
+- **RDF/XML is plain**, since Jena's pretty writer overflows the stack on
+  a long chain or list.
+- **Jena's message for a query that fails to run** stays in the :details
+  of the error, since it may tell more about the server than a client
+  needs to know.
+- **A refused query gets a 403** when the policy forbids its form or
+  SERVICE, and a 503 when it runs out of time or the pool is busy. The
+  protocol names 500 for a refusal, but allows other codes.
+- **The base IRI of a query is the endpoint's**, which section 2.3 of the
+  protocol allows.
+- **A dataset picks from the graphs of the db**, and nothing is fetched
+  from the web. On a db of a Model, which has no named graphs, a named
+  graph is empty. With :dataset? false, a request that names graphs gets a
+  400.
+- **SPARQL 1.2** has a version parameter and the QUERY method of
+  [RFC 10008](https://www.rfc-editor.org/rfc/rfc10008). The endpoint takes
+  both, and versions 1.1 and 1.2.
+
+The tests include the query tests of the W3C's
+[protocol test suite](https://w3c.github.io/rdf-tests/sparql/sparql11/protocol/).
+
 Jena's own API
 --------------
 
@@ -451,6 +580,7 @@ Not yet
 - a query that returns a set of tuples
 - one value or a set by a schema, e.g. SHACL's sh:maxCount 1
 - queries in Datomic's syntax
+- updates through the SPARQL endpoint, and the Graph Store Protocol
 
 Development
 -----------

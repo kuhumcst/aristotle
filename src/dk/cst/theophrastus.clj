@@ -247,13 +247,16 @@
 (defn query
   "The Jena Query of the SPARQL string `s`, parsed with the `prefixes` set
   (term/default-prefixes when none are given), so that `s` needs no PREFIX
-  lines for them."
+  lines for them. A relative IRI in `s` resolves against the IRI `base`,
+  when given."
   (^Query [s]
    (query s term/default-prefixes))
   (^Query [s prefixes]
+   (query s prefixes nil))
+  (^Query [s prefixes base]
    (let [q (doto (Query.)
              (.setPrefixMapping (convert/prefix-mapping prefixes)))]
-     (QueryFactory/parse q s nil Syntax/defaultQuerySyntax)
+     (QueryFactory/parse q s base Syntax/defaultQuerySyntax)
      q)))
 
 ;; for q, whose parameter db hides the function db
