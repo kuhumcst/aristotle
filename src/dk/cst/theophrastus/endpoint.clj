@@ -360,10 +360,17 @@
     (.hasDatasetDescription sparql)
     (DatasetDescription/create sparql)))
 
-(defn- restrict
-  "A copy of the Query `q` with the :limit, :offset and :distinct? of
-  prepare."
-  [^Query q {:keys [limit offset distinct?]}]
+(defn restrict
+  "A copy of the Query `q`, changed by the `opts`:
+
+  - :limit, the LIMIT of a query that has none or a higher one
+  - :offset, the OFFSET of a query that has none
+  - :distinct?, to make a SELECT a SELECT DISTINCT
+
+  prepare restricts each query by the same opts. To decide them by the
+  query, e.g. to page through a query that has no LIMIT of its own, prepare
+  it without them and restrict its :sparql afterwards."
+  ^Query [^Query q {:keys [limit offset distinct?]}]
   (let [q (.cloneQuery q)]
     (when (and limit (or (= Query/NOLIMIT (.getLimit q))
                          (> (.getLimit q) limit)))
@@ -383,9 +390,7 @@
   - :base, the IRI that relative IRIs in the query resolve against
   - :forms, :dataset?, :service?, :java? and :versions, as in defaults
   - :max-length, the most characters that a query may have
-  - :limit, the LIMIT of a query that has none or a higher one
-  - :offset, the OFFSET of a query that has none
-  - :distinct?, to make a SELECT a SELECT DISTINCT
+  - :limit, :offset and :distinct?, as restrict takes them
 
   A query that the opts don't allow gets an :error, e.g. 400 when it
   doesn't parse and 403 when it calls SERVICE. An operation with no query,

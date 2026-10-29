@@ -521,7 +521,9 @@ A step passes on a map that has an :error as it is, so the steps thread.
 To change one step, replace its interceptor with your own, e.g. a run that
 caches results, or a respond that shows them as HTML. Such a step can still
 write a result with `endpoint/write`, or make the response with
-`endpoint/respond`.
+`endpoint/respond`. To page through a query that has no LIMIT of its own,
+prepare it without :limit and :offset, and then restrict its :sparql with
+`endpoint/restrict`.
 
 These are the choices that the standards leave open:
 
