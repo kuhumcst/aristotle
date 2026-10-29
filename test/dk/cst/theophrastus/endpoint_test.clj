@@ -234,7 +234,13 @@
                        {:max-bytes 100}))
         "a Content-Length over :max-bytes")
     (is (nil? (error-type (post-request "application/sparql-query" [] body)
-                          {:max-bytes 1000})))))
+                          {:max-bytes 1000}))))
+  (is (= :not-utf-8
+         (error-type (post-request "application/sparql-query" []
+                                   (ByteArrayInputStream.
+                                     (byte-array [65 83 75 32 123 125 -1])))
+                     {}))
+      "a body that isn't UTF-8"))
 
 (deftest prepare
   (let [select (get-request [["query" "SELECT * { ?s ?p ?o }"]])

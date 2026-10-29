@@ -26,6 +26,8 @@
             [dk.simongray.whatwg-mime :as mime]
             [dk.simongray.whatwg-url.params :as params])
   (:import [java.io ByteArrayOutputStream InputStream]
+           [java.nio ByteBuffer]
+           [java.nio.charset CharacterCodingException StandardCharsets]
            [java.util.concurrent ExecutorService TimeUnit TimeoutException]
            [org.apache.jena.graph Triple]
            [org.apache.jena.query ARQ Dataset Query QueryCancelledException
@@ -185,10 +187,20 @@
           :else (do (.write out buf 0 n)
                     (recur (+ total n))))))))
 
+(defn- utf-8-text
+  "The text of the UTF-8 bytes `b`, or ::not-utf-8 when they aren't valid
+  UTF-8, which a String would replace without a word."
+  [^bytes b]
+  (try
+    (str (.decode (.newDecoder StandardCharsets/UTF_8) (ByteBuffer/wrap b)))
+    (catch CharacterCodingException _
+      ::not-utf-8)))
+
 (defn- body-text
-  "The body of the Ring `request` as UTF-8 text, nil when it has none, or
-  ::too-large when it holds more than `max-bytes`. A Content-Length over
-  the limit is enough, so that such a body is never read."
+  "The body of the Ring `request` as UTF-8 text, nil when it has none,
+  ::too-large when it holds more than `max-bytes`, or ::not-utf-8. A
+  Content-Length over the limit is enough, so that such a body is never
+  read."
   [{:keys [body headers]} max-bytes]
   (let [length (some-> (get headers "content-length") parse-long)]
     (cond
@@ -202,7 +214,7 @@
 
       (instance? InputStream body)
       (if-let [b (read-bytes body max-bytes)]
-        (String. ^bytes b "UTF-8")
+        (utf-8-text b)
         ::too-large))))
 
 (defn- form-pairs
@@ -251,6 +263,9 @@
           (= ::too-large text)
           (failure {} 413 :too-large
                    (str "A body has " max-bytes " bytes at most."))
+
+          (= ::not-utf-8 text)
+          (failure {} 400 :not-utf-8 "A body has to be in UTF-8.")
 
           form?
           (pairs->operation (into pairs (form-pairs request text)) nil m)
