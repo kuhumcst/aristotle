@@ -7,8 +7,8 @@
   returns. A Graph or Model of a dataset, e.g. TDB2, uses the transactions
   of that dataset, also under an inference graph. A plain in-memory graph
   has none, so the code runs as it is: other threads can see its writes,
-  and a failure partway through doesn't undo them. For an in-memory store
-  with transactions, use DatasetFactory/createTxnMem."
+  and a failure partway through doesn't undo them. The in-memory db that
+  theophrastus/db makes has transactions, unless :transactional? is false."
   (:import [java.util.concurrent ExecutionException ExecutorService Future
             RejectedExecutionException TimeUnit TimeoutException]
            [java.util.function Supplier]

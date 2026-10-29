@@ -41,9 +41,12 @@
 
   - :prefixes, the prefixes of the IRIs that become keywords, in the shape
     of term/default-prefixes, which it is unless given.
+  - :transactional?, true unless given, and only for a db with no `x`.
 
   With no `x`, it returns the db of a new in-memory Dataset with
-  transactions. A Graph is used through a Model of it, and a DatasetGraph
+  transactions. With :transactional? false, it's a plain Model instead,
+  which is faster to fill and read, but has only one graph and doesn't undo
+  a failed write. A Graph is used through a Model of it, and a DatasetGraph
   through a Dataset, without copying. The prefixes replace those of `x`
   where they differ, which for TDB2 writes them to disk."
   ([]
@@ -51,10 +54,17 @@
   ([x]
    ;; a Db is a map too, but not one of options
    (if (and (map? x) (not (record? x)))
-     (db (DatasetFactory/createTxnMem) x)
+     (db (if (get x :transactional? true)
+           (DatasetFactory/createTxnMem)
+           (ModelFactory/createDefaultModel))
+         (dissoc x :transactional?))
      (db x nil)))
   ([x {:keys [prefixes] :or {prefixes term/default-prefixes} :as opts}]
    (cond
+     (contains? opts :transactional?)
+     (throw (ex-info "Not an option for a given store: :transactional?"
+                     {:x x}))
+
      (instance? Graph x)
      (db (ModelFactory/createModelForGraph x) opts)
 

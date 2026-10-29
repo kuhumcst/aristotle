@@ -6,7 +6,7 @@
             [dk.cst.theophrastus.convert :as convert]
             [dk.cst.theophrastus.txn :as txn])
   (:import [org.apache.jena.graph Graph Node]
-           [org.apache.jena.rdf.model Model ModelFactory]
+           [org.apache.jena.rdf.model Model]
            [org.apache.jena.shacl ShaclValidator Shapes ValidationReport]
            [org.apache.jena.shacl.validation ReportEntry]
            [org.apache.jena.sparql.path P_Link Path]))
@@ -19,8 +19,7 @@
                    (instance? Graph x) x
                    (instance? Model x) (.getGraph ^Model x)
                    (map? x)            (theo/jena-graph x)
-                   :else               (-> (ModelFactory/createDefaultModel)
-                                           (theo/db)
+                   :else               (-> (theo/db {:transactional? false})
                                            (theo/read! x)
                                            (theo/jena-graph)))]
     (Shapes/parse g)))

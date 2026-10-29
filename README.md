@@ -348,9 +348,12 @@ began, so a block that always writes is better off with
 function of no arguments instead: `txn/calculate-write`,
 `txn/calculate-read` and `txn/calculate`.
 
-The db that `theo/db` makes in memory has transactions. If you pass it a
-plain in-memory Model instead, other threads see each write as it happens,
-and a failure partway through doesn't undo it.
+The db that `theo/db` makes in memory has transactions. With
+`:transactional? false`, it makes a plain Model instead, which is faster
+to fill and read, e.g. for a large import or the schema of a reasoner.
+Other threads then see each write as it happens, and a failure partway
+through isn't undone. A Model also has only one graph, so `named-graph`
+throws on it.
 
 Connect to a TDB2 database with `tdb2/connect`, which creates it when the
 directory doesn't exist:

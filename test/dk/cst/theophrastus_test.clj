@@ -86,7 +86,16 @@
     (is (thrown? ExceptionInfo
                  (theo/transact! db [[:ex/s :ex/p "q"]
                                    [:ex/s :ex/p (term/->LangString "x" "en_US")]])))
-    (is (= 1 (graph-size db)) "a failed write is undone")))
+    (is (= 1 (graph-size db)) "a failed write is undone"))
+  (let [db (theo/db {:prefixes prefixes :transactional? false})]
+    (is (instance? Model (:model db)) "a plain Model")
+    (theo/transact! db [[:ex/s :ex/p "o"]])
+    (is (= [{'?o "o"}] (theo/q db "SELECT ?o WHERE { ?s ?p ?o }")))
+    (is (thrown-with-msg? ExceptionInfo #"A Model has no named graphs"
+                          (theo/named-graph db :ex/g))))
+  (is (thrown-with-msg? ExceptionInfo #"Not an option for a given store"
+                        (theo/db (ModelFactory/createDefaultModel)
+                                 {:transactional? false}))))
 
 (deftest tdb2-prefixes
   (let [dir     (str (Files/createTempDirectory "theophrastus"
