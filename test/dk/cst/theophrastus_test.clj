@@ -99,6 +99,16 @@
                         (theo/db (ModelFactory/createDefaultModel)
                                  {:transactional? false}))))
 
+(deftest matching-by-term
+  (doseq [db [(theo/db {:prefixes prefixes})
+              (theo/db {:prefixes prefixes :transactional? false})]]
+    (theo/transact! db [[:ex/s :ex/p (term/literal "01" :xsd/integer)]])
+    (is (empty? (theo/q db "SELECT ?s WHERE { ?s ex:p 1 }"))
+        "a pattern matches a literal by term, as in TDB2")
+    (is (= [{'?s :ex/s}]
+           (theo/q db "SELECT ?s WHERE { ?s ex:p ?o FILTER (?o = 1) }"))
+        "a FILTER compares values")))
+
 (deftest tdb2-prefixes
   (let [dir     (str (Files/createTempDirectory "theophrastus"
                                                (make-array FileAttribute 0)))

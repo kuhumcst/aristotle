@@ -27,6 +27,9 @@ These are the decisions that shape Theophrastus, and the reasons for them.
 - **A literal that no native type holds exactly stays a literal**, the same
   on both platforms. A function turns it into a JVM value on demand, so an
   ill-formed literal no longer fails a whole query.
+- **Matching by term.** The in-memory graphs that the library makes match
+  by term, as TDB2 does, so a query finds the same data in memory and on
+  disk. FILTER still compares values.
 - **The store keeps the prefixes.** Jena stores prefixes with the data, so
   the library has no registry of its own. The prefixes you pass in win
   over the stored ones.

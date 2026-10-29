@@ -10,7 +10,7 @@
             [clojure.java.io :as io])
   (:import [clojure.lang IReduceInit]
            [java.io Writer]
-           [org.apache.jena.graph Graph GraphUtil Node Triple]
+           [org.apache.jena.graph Graph GraphMemFactory GraphUtil Node Triple]
            [org.apache.jena.query ARQ Dataset DatasetFactory Query QueryFactory
             Syntax]
            [org.apache.jena.rdf.model Model ModelFactory]
@@ -65,7 +65,9 @@
    (if (and (map? x) (not (record? x)))
      (db (if (get x :transactional? true)
            (DatasetFactory/createTxnMem)
-           (ModelFactory/createDefaultModel))
+           ;; a graph that matches by term, as the Dataset and TDB2 do,
+           ;; unlike the one of ModelFactory/createDefaultModel
+           (GraphMemFactory/createDefaultGraph))
          (dissoc x :transactional?))
      (db x nil)))
   ([x {:keys [prefixes] :or {prefixes term/default-prefixes} :as opts}]
