@@ -17,7 +17,7 @@ Theophrastus is our **total makeover** of Aristotle. It's based on Apache Jena 6
 
 **NOTE:** we removed support for [Aristotle's query language] (based on [ARQ]). Complex queries were too hard to build with it, and it was poorly documented. Theophrastus still supports SPARQL, so you can write a query by hand or with any library that produces SPARQL, e.g. [Flint] for queries as Clojure data.
 
-[Centre for Language Technology]: https://cst.ku.dk/english
+[Centre for Language Technology]: https://github.com/kuhumcst
 [Aristotle]: https://github.com/arachne-framework/aristotle
 [DanNet]: https://github.com/kuhumcst/DanNet
 [Apache Jena]: https://jena.apache.org
