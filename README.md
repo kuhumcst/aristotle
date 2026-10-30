@@ -94,8 +94,10 @@ You can also pull nested data with a [Datomic-style pattern]:
 ;;                   {:rdf/about :ex/carol :rdfs/label "Carol"}}}
 ```
 
-A string with a language tag, such as `'爱丽丝'@zh` in SPARQL or [Turtle],
-is a langstring in Clojure:
+### Language tags
+
+A string with a language tag, e.g. `'爱丽丝'@zh` in SPARQL or [Turtle],
+parses into `#rdf/langstring ["爱丽丝" "zh"]` in Clojure:
 
 ```clojure
 (theo/update! db "INSERT DATA { ex:alice rdfs:label '爱丽丝'@zh }")
