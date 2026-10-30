@@ -12,7 +12,9 @@
             [dk.simongray.whatwg-url.params :as params])
   (:import [java.io ByteArrayInputStream]
            [java.util.concurrent SynchronousQueue ThreadPoolExecutor
-            TimeUnit]))
+            TimeUnit]
+           [org.apache.jena.query DatasetFactory]
+           [org.apache.jena.tdb2 TDB2Factory]))
 
 (def prefixes
   "The default prefixes and one for the examples."
@@ -188,6 +190,25 @@
         (= :rdf result)
         (is (some #{(content-type response)}
                   (:construct endpoint/media-types)))))))
+
+(deftest default-graph
+  (doseq [ds [(DatasetFactory/createTxnMem) (TDB2Factory/createDataset)]
+          :let [doc "<http://xmlns.com/foaf/0.1/Document>"
+                _   (doseq [n [1 2]
+                            :let [iri (str "<" (data n) ">")]]
+                      (-> (theo/db ds)
+                          (theo/named-graph iri)
+                          (theo/transact! [[iri :rdf/type doc]])))
+                ask (fn [default-graph query]
+                      (->> (endpoint/handle
+                             (get-request [["query" query]])
+                             {:db (theo/db ds {:default-graph default-graph})})
+                           (:body)
+                           (text)
+                           (re-find #"\"boolean\"\s*:\s*true")))]]
+    (is (ask :union ask-1-2) "the union of the named graphs")
+    (is (not (ask (str "<" (data 1) ">") ask-1-2)) "one of them")
+    (is (ask (str "<" (data 1) ">") ask-graphs) "GRAPH sees them all")))
 
 (defn- error-type
   "The type of the error of the operation of the `request`, prepared with

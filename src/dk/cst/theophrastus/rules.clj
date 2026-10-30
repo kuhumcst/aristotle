@@ -6,7 +6,9 @@
   properties that the rules infer as :inferred in its metadata.
 
   See https://jena.apache.org/documentation/inference/"
+  (:require [dk.cst.theophrastus :as theo])
   (:import [java.util List]
+           [org.apache.jena.graph Graph]
            [org.apache.jena.rdf.model InfModel Model ModelFactory]
            [org.apache.jena.reasoner Reasoner ReasonerRegistry]
            [org.apache.jena.reasoner.rulesys GenericRuleReasoner Rule
@@ -44,13 +46,26 @@
      (.setTransitiveClosureCaching (boolean transitive-closure-caching?))
      (.setOWLTranslation (boolean owl-translation?)))))
 
+(defn- model
+  "The Model of `x`: a db, a Model or a Graph."
+  ^Model [x]
+  (cond
+    (instance? Model x) x
+    (instance? Graph x) (ModelFactory/createModelForGraph x)
+    (map? x)            (theo/jena-model x)
+    :else (throw (ex-info (str "Not a db, Model or Graph: " x) {:x x}))))
+
 (defn inf-model
-  "An inference Model of the `reasoner` over the `data` Model, with the
-  `schema` Model when given."
-  (^InfModel [^Reasoner reasoner ^Model data]
-   (ModelFactory/createInfModel reasoner data))
-  (^InfModel [^Reasoner reasoner ^Model schema ^Model data]
-   (ModelFactory/createInfModel reasoner schema data)))
+  "An inference Model of the `reasoner` over the `data`, with the `schema`
+  when given. Each is a db, a Model or a Graph, and the data is a new
+  in-memory Model when there is none, as (theo/db {:transactional? false})
+  makes it."
+  (^InfModel [reasoner]
+   (inf-model reasoner (theo/db {:transactional? false})))
+  (^InfModel [^Reasoner reasoner data]
+   (ModelFactory/createInfModel reasoner (model data)))
+  (^InfModel [^Reasoner reasoner schema data]
+   (ModelFactory/createInfModel reasoner (model schema) (model data))))
 
 (def owl-rules
   "The largest set of OWL rules that Jena supports, as a vector."

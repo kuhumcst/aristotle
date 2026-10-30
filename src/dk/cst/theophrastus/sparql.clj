@@ -1,7 +1,8 @@
 (ns dk.cst.theophrastus.sparql
   "The parts of theo/q, theo/reducible and theo/update!, for running SPARQL
   on a db with Jena's own API."
-  (:require [dk.cst.theophrastus.convert :as convert])
+  (:require [dk.cst.theophrastus.convert :as convert]
+            [dk.cst.theophrastus.impl.dataset :as dataset])
   (:import [java.util.concurrent TimeUnit]
            [org.apache.jena.graph Node]
            [org.apache.jena.query Dataset Query]
@@ -11,6 +12,7 @@
            [org.apache.jena.sparql.exec QueryExec QueryExecBuilder RowSet
             UpdateExec UpdateExecBuilder]
            [org.apache.jena.sparql.syntax ElementData ElementGroup]
+           [org.apache.jena.tdb2 TDB2]
            [org.apache.jena.update UpdateRequest]))
 
 (defn- variable
@@ -72,13 +74,23 @@
 (defn query-exec-builder
   "The QueryExecBuilder that runs `query` on `db` with the `opts` of theo/q.
   Its context has the prefixes of `db`, for the SPARQL functions of the
-  function namespace."
-  ^QueryExecBuilder [{:keys [^Model model ^Dataset dataset prefixes]}
+  function namespace.
+
+  Make it in the transaction that runs the query, since for a db with a
+  :default-graph it links the named graphs of the Dataset as they are."
+  ^QueryExecBuilder [{:keys [^Model model ^Dataset dataset prefixes] :as db}
                      ^Query query
                      {:keys [timeout]}]
-  (cond-> (-> (if dataset
-                (QueryExec/dataset (.asDatasetGraph dataset))
-                (QueryExec/graph (.getGraph model)))
+  (cond-> (-> (cond
+                model
+                (QueryExec/graph (.getGraph model))
+
+                (dataset/tdb2-union? db)
+                (-> (QueryExec/dataset (.asDatasetGraph dataset))
+                    (.set TDB2/symUnionDefaultGraph ^Object Boolean/TRUE))
+
+                :else
+                (QueryExec/dataset (dataset/dataset-graph db)))
               (.query query)
               (.set convert/prefixes-symbol ^Object prefixes))
     timeout (.timeout (long timeout) TimeUnit/MILLISECONDS)))
@@ -122,13 +134,20 @@
 (defn update-exec-builder
   "The UpdateExecBuilder that runs the UpdateRequest `request` on `db`, with
   the values of the `bindings` (as theo/update! takes them) in place of
-  their variables."
-  ^UpdateExecBuilder [{:keys [^Model model ^Dataset dataset prefixes]}
-                      ^UpdateRequest request
-                      bindings]
-  (reduce-kv #(substitute %1 %2 %3 prefixes)
-             (-> (if dataset
-                   (UpdateExec/dataset (.asDatasetGraph dataset))
-                   (UpdateExec/graph (.getGraph model)))
-                 (.update request))
-             bindings))
+  their variables, and the `opts` of theo/update!. Make it in the
+  transaction that runs the update, as for query-exec-builder."
+  (^UpdateExecBuilder [db request bindings]
+   (update-exec-builder db request bindings nil))
+  (^UpdateExecBuilder [{:keys [^Model model prefixes] :as db}
+                       ^UpdateRequest request
+                       bindings
+                       {:keys [timeout]}]
+   (let [^UpdateExecBuilder b
+         (reduce-kv #(substitute %1 %2 %3 prefixes)
+                    (-> (if model
+                          (UpdateExec/graph (.getGraph model))
+                          (UpdateExec/dataset (dataset/dataset-graph db)))
+                        (.update request))
+                    bindings)]
+     (cond-> b
+       timeout (.timeout (long timeout) TimeUnit/MILLISECONDS)))))

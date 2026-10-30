@@ -2,6 +2,7 @@
   "A db of a Jena Model or Dataset, in the style of Datomic. The functions
   that change a db end in !."
   (:require [dk.cst.theophrastus.convert :as convert]
+            [dk.cst.theophrastus.impl.dataset :as dataset]
             [dk.cst.theophrastus.impl.entity :as entity]
             [dk.cst.theophrastus.impl.files :as files]
             [dk.cst.theophrastus.sparql :as sparql]
@@ -9,19 +10,19 @@
             [dk.cst.theophrastus.term :as term]
             [clojure.java.io :as io])
   (:import [clojure.lang IReduceInit]
-           [java.io Writer]
+           [java.io OutputStream Writer]
            [org.apache.jena.graph Graph GraphMemFactory GraphUtil Node Triple]
            [org.apache.jena.query ARQ Dataset DatasetFactory Query QueryFactory
             Syntax]
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.reasoner BaseInfGraph]
-           [org.apache.jena.riot RDFDataMgr]
+           [org.apache.jena.riot RDFWriter]
            [org.apache.jena.shared PrefixMapping]
            [org.apache.jena.sparql.core DatasetGraph]
            [org.apache.jena.tdb2 DatabaseMgr TDB2]
            [org.apache.jena.update UpdateFactory UpdateRequest]))
 
-(defrecord Db [model dataset prefixes])
+(defrecord Db [model dataset prefixes default-graph])
 
 (defmethod print-method Db
   [db ^Writer writer]
@@ -45,6 +46,18 @@
                                   (.clearNsPrefixMap)
                                   (.setNsPrefixes ^java.util.Map mapping))))))
 
+(defn- graph-names
+  "The :default-graph option `x` with each IRI in it expanded by the
+  `prefixes`."
+  [x prefixes]
+  (let [iri #(or (term/iri % prefixes)
+                 (throw (ex-info (str "Not a graph name: " (pr-str %))
+                                 {:graph-name %})))]
+    (cond
+      (or (nil? x) (= :union x)) x
+      (set? x)                   (into #{} (map iri) x)
+      :else                      (iri x))))
+
 (defn db
   "A db of `x` (a Jena Model, Dataset, Graph or DatasetGraph) with these
   `opts`:
@@ -53,6 +66,11 @@
     when none are given). They replace the prefixes stored in `x`, and on
     TDB2 that writes them to disk.
   - :transactional?, only when there is no `x` (true when not given).
+  - :default-graph, the graph of a Dataset that the db reads and writes as
+    its default graph: :union for the union of the named graphs, the IRI of
+    a named graph, e.g. a keyword, or a set of IRIs for the union of those.
+    A query still sees every named graph with GRAPH. A union can only be
+    read.
 
   With no `x`, the db is a new in-memory Dataset with transactions, or a
   plain Model when :transactional? is false. A Model is faster to fill and
@@ -70,7 +88,9 @@
            (GraphMemFactory/createDefaultGraph))
          (dissoc x :transactional?))
      (db x nil)))
-  ([x {:keys [prefixes] :or {prefixes term/default-prefixes} :as opts}]
+  ([x {:keys [prefixes default-graph]
+       :or   {prefixes term/default-prefixes}
+       :as   opts}]
    (cond
      (contains? opts :transactional?)
      (throw (ex-info "Not an option for a given store: :transactional?"
@@ -83,20 +103,26 @@
      (db (DatasetFactory/wrap ^DatasetGraph x) opts)
 
      (instance? Dataset x)
-     (do (set-prefixes! x prefixes)
-         (->Db nil x prefixes))
+     (let [names (graph-names default-graph prefixes)]
+       (set-prefixes! x prefixes)
+       (->Db nil x prefixes names))
+
+     (some? default-graph)
+     (throw (ex-info "A Model has no named graphs"
+                     {:default-graph default-graph}))
 
      (instance? Model x)
      (do (set-prefixes! x prefixes)
-         (->Db x nil prefixes))
+         (->Db x nil prefixes nil))
 
      :else
      (throw (ex-info (str "Not a Model, Dataset or Graph: " x) {:x x})))))
 
 (defn jena-model
-  "The Jena Model of `db`: its Model, or its Dataset's default Model."
-  ^Model [{:keys [^Model model ^Dataset dataset] :as db}]
-  (or model (.getDefaultModel dataset)))
+  "The Jena Model of `db`: its Model, or the Model of its Dataset's default
+  graph, which :default-graph picks."
+  ^Model [{:keys [^Model model] :as db}]
+  (or model (ModelFactory/createModelForGraph (dataset/default-graph db))))
 
 (defn jena-dataset
   "The Jena Dataset of `db`, or nil when it's a db of a Model."
@@ -105,17 +131,18 @@
 
 (defn jena-graph
   "The Jena Graph of `db`: its Model's graph, or its Dataset's default
-  graph."
-  ^Graph [{:keys [^Model model ^Dataset dataset] :as db}]
-  (.getGraph (or model (.getDefaultModel dataset))))
+  graph, which :default-graph picks."
+  ^Graph [db]
+  (dataset/default-graph db))
 
 ;; as in Jena's DatasetGraph: getDefaultGraph, getGraph and getUnionGraph
 (defn default-graph
-  "A db of the default graph of `db`, with the same prefixes, or `db` itself
-  when it's a db of a Model, which has no other graph."
+  "A db of the default graph of `db` (the one that its :default-graph
+  picks), with the same prefixes, or `db` itself when it's a db of a Model,
+  which has no other graph."
   [{:keys [dataset prefixes] :as db}]
   (if dataset
-    (->Db (.getDefaultModel ^Dataset dataset) nil prefixes)
+    (->Db (jena-model db) nil prefixes nil)
     db))
 
 (defn named-graph
@@ -129,7 +156,7 @@
       (throw (ex-info "A Model has no named graphs" {:graph-name graph-name}))
 
       iri
-      (->Db (.getNamedModel ^Dataset dataset ^String iri) nil prefixes)
+      (->Db (.getNamedModel ^Dataset dataset ^String iri) nil prefixes nil)
 
       :else
       (throw (ex-info (str "Not a graph name: " (pr-str graph-name))
@@ -140,15 +167,16 @@
   prefixes."
   [{:keys [dataset prefixes] :as db}]
   (if dataset
-    (->Db (.getUnionModel ^Dataset dataset) nil prefixes)
+    (->Db (.getUnionModel ^Dataset dataset) nil prefixes nil)
     (throw (ex-info "A Model has no named graphs" {}))))
 
 (defn transact!
   "Add `tx-data` to `db` in one write transaction, and return `db`. It goes
-  into the default graph of a Dataset, or into the graph of a db from
-  named-graph.
+  into the default graph of a Dataset (the one that :default-graph picks),
+  or into the graph of a db from named-graph.
 
-  The data is a Jena Graph or Model, or a coll of:
+  The data is another db, e.g. from a CONSTRUCT, a Jena Graph or Model, or
+  a coll of:
 
   - [s p o] triples of Clojure values;
   - maps of a subject's properties, with the subject as :rdf/about, or a
@@ -165,6 +193,11 @@
   (let [source (cond
                  (instance? Graph tx-data) tx-data
                  (instance? Model tx-data) (.getGraph ^Model tx-data)
+                 ;; read in its own transaction, since it may be on TDB2
+                 (instance? Db tx-data)    (txn/calculate-read
+                                             tx-data
+                                             #(.toList (.find (jena-graph
+                                                                tx-data))))
                  :else (convert/triples tx-data prefixes))]
     (txn/calculate-write db
                          #(let [g (jena-graph db)]
@@ -191,26 +224,46 @@
     db))
 
 (defn read!
-  "Read the RDF file `source` (or a coll of sources) into `db` as transact!
-  does, and return `db`.
+  "Read the RDF `source` (or a coll of sources) into `db` as transact! does,
+  with these `opts`, and return `db`:
 
-  A source is a File, URL, URI or file path, and its name gives the syntax,
-  e.g. Turtle for .ttl. All the files are parsed before anything is added,
-  so a syntax error leaves `db` as it was."
-  [db source]
-  (transact! db (files/parse (if (sequential? source) source [source]))))
+  - :syntax, a media type, e.g. \"text/turtle\", or a keyword of the name or
+    file extension of a syntax: :turtle or :ttl, :n-triples or :nt, :rdf-xml
+    or :rdf, :json-ld or :jsonld, and :n3. Without it, the name of a source
+    gives the syntax, e.g. Turtle for .ttl.
+  - :base, the IRI that relative IRIs resolve against, by default the URL of
+    the source.
+
+  A source is a File, URL, URI or file path, or an InputStream or Reader
+  with a :syntax. All the sources are parsed before anything is added, so a
+  syntax error leaves `db` as it was."
+  ([db source]
+   (read! db source nil))
+  ([db source opts]
+   (transact! db (files/parse (if (sequential? source) source [source])
+                              opts))))
 
 (defn write
-  "Write `db` to the file `target` (a File or path), and return `db`. The
-  file's name gives the syntax, e.g. Turtle for .ttl, and the file has the
-  prefixes of `db`. A db of a Dataset writes its default graph."
-  [db target]
-  (let [f    (io/file target)
-        lang (files/syntax f)]
-    (txn/calculate-read db
-                        #(with-open [out (io/output-stream f)]
-                           (RDFDataMgr/write out (jena-graph db) lang)))
-    db))
+  "Write `db` to the `target`, with the :syntax of the `opts` as read! takes
+  it, and return `db`.
+
+  The target is a File or path, whose name gives the syntax when there is
+  no :syntax, e.g. Turtle for .ttl, or an OutputStream or Writer. The output
+  has the prefixes of `db`, and a db of a Dataset writes its default graph."
+  ([db target]
+   (write db target nil))
+  ([db target {:keys [syntax]}]
+   (let [stream? (or (instance? OutputStream target) (instance? Writer target))
+         lang    (files/lang syntax (when-not stream? (io/file target)))]
+     (txn/calculate-read
+       db
+       #(let [w (-> (RDFWriter/source (jena-graph db)) (.lang lang) (.build))]
+          (cond
+            (instance? Writer target)       (.output w ^Writer target)
+            (instance? OutputStream target) (.output w ^OutputStream target)
+            :else (with-open [out (io/output-stream (io/file target))]
+                    (.output w out)))))
+     db)))
 
 ;; RDF 1.1 Turtle, section 2.8: a collection is rdf:first, rdf:rest and
 ;; rdf:nil, with no rdf:type
@@ -296,13 +349,12 @@
   ([db x bindings]
    (q db x bindings nil))
   ([{:keys [prefixes] :as db} x bindings opts]
-   (let [bound   (sparql/bind (if (string? x) (parse-query x prefixes) x)
-                              bindings
-                              prefixes)
-         builder (sparql/query-exec-builder db bound opts)]
+   (let [bound (sparql/bind (if (string? x) (parse-query x prefixes) x)
+                            bindings
+                            prefixes)]
      (txn/calculate-read
        db
-       #(with-open [qe (.build builder)]
+       #(with-open [qe (.build (sparql/query-exec-builder db bound opts))]
           (cond
             (.isSelectType bound)    (persistent!
                                        (sparql/reduce-rows conj!
@@ -331,43 +383,50 @@
   ([db x bindings]
    (reducible db x bindings nil))
   ([{:keys [prefixes] :as db} x bindings opts]
-   (let [bound   (sparql/bind (if (string? x) (parse-query x prefixes) x)
-                              bindings
-                              prefixes)
-         builder (sparql/query-exec-builder db bound opts)]
+   (let [bound (sparql/bind (if (string? x) (parse-query x prefixes) x)
+                            bindings
+                            prefixes)]
      (when-not (.isSelectType bound)
        (throw (ex-info (str "Not a SELECT query: " bound) {:query bound})))
      (reify IReduceInit
        (reduce [_ f init]
          (txn/calculate-read
            db
-           #(with-open [qe (.build builder)]
+           #(with-open [qe (.build (sparql/query-exec-builder db bound opts))]
               (sparql/reduce-rows f init (.select qe) prefixes))))))))
 
 (defn parse-update
   "The Jena UpdateRequest of the SPARQL Update string `s`, parsed with the
   `prefixes` set (term/default-prefixes when none are given), so that `s`
-  needs no PREFIX lines for them."
+  needs no PREFIX lines for them. A relative IRI in `s` resolves against
+  the IRI `base`, when given."
   (^UpdateRequest [s]
    (parse-update s term/default-prefixes))
   (^UpdateRequest [s prefixes]
+   (parse-update s prefixes nil))
+  (^UpdateRequest [s prefixes base]
    (doto (UpdateRequest.)
      (.setPrefixMapping (convert/prefix-mapping prefixes))
-     (UpdateFactory/parse ^String s))))
+     (UpdateFactory/parse ^String s ^String base))))
 
 (defn update!
-  "Run the SPARQL Update `x` on `db` with the `bindings` in one write
-  transaction, and return `db`.
+  "Run the SPARQL Update `x` on `db` with the `bindings` and `opts` in one
+  write transaction, and return `db`.
 
   The update is an UpdateRequest, or a string that is parsed with the
   prefixes of `db`. A binding gives a variable one value, e.g.
-  {'?s :ex/luke}, which goes in as an RDF term, never as SPARQL text."
+  {'?s :ex/luke}, which goes in as an RDF term, never as SPARQL text. The
+  only option is :timeout, in milliseconds, as for q."
   ([db x]
-   (update! db x nil))
-  ([{:keys [prefixes] :as db} x bindings]
-   (let [request (if (string? x) (parse-update x prefixes) x)
-         builder (sparql/update-exec-builder db request bindings)]
-     (txn/calculate-write db #(.execute (.build builder)))
+   (update! db x nil nil))
+  ([db x bindings]
+   (update! db x bindings nil))
+  ([{:keys [prefixes] :as db} x bindings opts]
+   (let [request (if (string? x) (parse-update x prefixes) x)]
+     (txn/calculate-write
+       db
+       #(.execute (.build (sparql/update-exec-builder db request bindings
+                                                      opts))))
      db)))
 
 ;; as TDB2's QueryEngineTDB checks it, with the context of the dataset over
@@ -390,16 +449,14 @@
 ;; SPARQL query for each subject, so they have to read the graph that q
 ;; reads, and for TDB2 that can be the union graph rather than the default
 (defn- query-graph
-  "The Graph that a query on `db` reads: its Model's graph, its Dataset's
-  default graph, or the union of the named graphs when TDB2 makes that the
-  default."
-  ^Graph [{:keys [^Model model ^Dataset dataset]}]
-  (if dataset
-    (let [dsg (.asDatasetGraph dataset)]
-      (if (union-default-graph? dsg)
-        (.getUnionGraph dsg)
-        (.getDefaultGraph dsg)))
-    (.getGraph model)))
+  "The Graph that a query on `db` reads: its default graph, or the union of
+  the named graphs when the context of TDB2 makes that the default."
+  ^Graph [{:keys [^Dataset dataset default-graph] :as db}]
+  (if (and dataset
+           (nil? default-graph)
+           (union-default-graph? (.asDatasetGraph dataset)))
+    (.getUnionGraph (.asDatasetGraph dataset))
+    (jena-graph db)))
 
 (defn triples
   "The triples of `db` that match the [s p o] `pattern`, where _ matches

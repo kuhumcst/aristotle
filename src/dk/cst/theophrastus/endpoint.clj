@@ -20,6 +20,7 @@
   (:require [clojure.string :as str]
             [dk.cst.theophrastus :as theo]
             [dk.cst.theophrastus.convert :as convert]
+            [dk.cst.theophrastus.impl.dataset :as dataset]
             [dk.cst.theophrastus.term :as term]
             [dk.cst.theophrastus.txn :as txn]
             [dk.simongray.conneg :as conneg]
@@ -44,7 +45,8 @@
            [org.apache.jena.sparql.exec QueryExec QueryExecBuilder]
            [org.apache.jena.sparql.expr E_Function ExprVisitorBase]
            [org.apache.jena.sparql.resultset ResultSetMem ResultsWriter]
-           [org.apache.jena.sparql.util Symbol]))
+           [org.apache.jena.sparql.util Symbol]
+           [org.apache.jena.tdb2 TDB2]))
 
 (def all-forms
   "The forms of a SPARQL query."
@@ -485,21 +487,29 @@
 
 (defn- execute
   "The result of the :sparql query of the operation `op` on `db`, with the
-  `opts` of run, read in one read transaction."
+  `opts` of run, read in one read transaction. Without a dataset in the
+  request, the default graph is the one that the :default-graph of `db`
+  picks."
   [db {:keys [sparql form] :as op} opts]
-  (let [desc (dataset-description op)
-        dsg  (if desc
-               (DynamicDatasets/dynamicDataset desc (dataset-graph db) false)
-               (dataset-graph db))
-        q    (cond-> sparql desc (without-dataset))]
+  (let [desc   (dataset-description op)
+        union? (and (nil? desc) (dataset/tdb2-union? db))
+        q      (cond-> sparql desc (without-dataset))]
     (txn/calculate-read
       db
-      #(with-open [qe (.build (exec-builder db q dsg opts))]
-         (case form
-           :select (ResultSetMem. (ResultSet/adapt (.select qe)))
-           :ask (.ask qe)
-           :construct (ModelFactory/createModelForGraph (.construct qe))
-           :describe (ModelFactory/createModelForGraph (.describe qe)))))))
+      ;; in the transaction, since a view of the db links its named graphs
+      #(let [dsg (cond
+                   desc   (DynamicDatasets/dynamicDataset
+                            desc (dataset-graph db) false)
+                   union? (dataset-graph db)
+                   :else  (dataset/dataset-graph db))]
+         (with-open [qe (.build (cond-> (exec-builder db q dsg opts)
+                                  union? (.set TDB2/symUnionDefaultGraph
+                                               ^Object Boolean/TRUE)))]
+           (case form
+             :select (ResultSetMem. (ResultSet/adapt (.select qe)))
+             :ask (.ask qe)
+             :construct (ModelFactory/createModelForGraph (.construct qe))
+             :describe (ModelFactory/createModelForGraph (.describe qe))))))))
 
 (defn- run-failure
   "The operation `op` with an :error of the `status`, `type` and `message`

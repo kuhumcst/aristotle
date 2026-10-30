@@ -162,7 +162,8 @@ it has none:
 - a predicate such as `:ex/_knows` links the other way.
 
 The data is all converted before anything is written, so an error leaves
-the db as it was. A Jena Graph or Model works as data too.
+the db as it was. Another db works as data too, e.g. the result of a
+CONSTRUCT, and so does a Jena Graph or Model.
 
 Remove triples with `theo/retract!`, where `_` in a pattern matches
 anything, and run a SPARQL Update with `theo/update!`:
@@ -184,6 +185,17 @@ before anything is added:
 (theo/write db "people.ttl")
 
 (theo/read! db ["schema.ttl" "people.ttl"])
+```
+
+For a stream, or a file whose name doesn't give the syntax, pass the
+syntax as a media type or a keyword, e.g. `:turtle` or `:ttl`. Pass
+`:base` too for the IRI that relative IRIs resolve against:
+
+```clojure
+(theo/read! db (:body response) {:syntax "text/turtle"
+                                 :base   "https://example.com/"})
+
+(with-out-str (theo/write db *out* {:syntax :nt}))
 ```
 
 For an RDF list, use `theo/rdf-list` in a map, and for a container
@@ -214,6 +226,23 @@ the union of the named graphs:
 Each one is a cheap view of the Dataset with the same prefixes, and the
 union can only be read.
 
+A view sees only its own graph. To keep the named graphs in reach of
+`GRAPH`, give the db another default graph with the `:default-graph`
+option of `theo/db`: `:union`, the IRI of a named graph, or a set of IRIs
+for the union of those graphs. Writes go into a named graph, and a union
+can only be read:
+
+```clojure
+(def everyone
+  (theo/db (theo/jena-dataset db) {:prefixes prefixes :default-graph :union}))
+
+(theo/entity everyone :ex/dave)
+;; => {:rdf/about :ex/dave :rdfs/label "Dave"}
+```
+
+On TDB2, `:union` uses TDB2's own union default graph, which runs a query
+on its indexes.
+
 Queries
 -------
 
@@ -238,8 +267,9 @@ and a CONSTRUCT or DESCRIBE a new db of the triples, in memory.
 
 To parse a query once and run it often, pass the result of
 `theo/parse-query` to `theo/q`. After the bindings, an options map can set
-a `:timeout` in milliseconds. Jena only checks it when the query moves on to its next
-result, so for a hard limit, see `txn/with-hard-timeout`.
+a `:timeout` in milliseconds, for `theo/update!` too. Jena only checks it
+when the query moves on to its next result, so for a hard limit, see
+`txn/with-hard-timeout`.
 
 For a result too large to hold in memory, `theo/reducible` takes the same
 arguments and runs a SELECT as you reduce over it, one row at a time:
@@ -367,7 +397,8 @@ directory doesn't exist:
 ```
 
 TDB2 only frees the space of deleted and changed data when you compact the
-database with `tdb2/compact!`.
+database with `tdb2/compact!`. To back it up as gzipped N-Quads, use
+`tdb2/backup`, which returns the path of the file.
 
 Rules, functions and SHACL
 --------------------------
@@ -377,7 +408,6 @@ its inference Model:
 
 ```clojure
 (require '[dk.cst.theophrastus.rules :as rules])
-(import '[org.apache.jena.rdf.model ModelFactory])
 
 (def reasoner
   (rules/reasoner
@@ -385,14 +415,18 @@ its inference Model:
                   [(?a ex:knows ?b) -> (?b ex:knows ?a)]")))
 
 (def inf-db
-  (theo/db (rules/inf-model reasoner (ModelFactory/createDefaultModel))
-           {:prefixes prefixes}))
+  (theo/db (rules/inf-model reasoner) {:prefixes prefixes}))
 
 (theo/transact! inf-db [[:ex/alice :ex/knows :ex/bob]])
 
 (meta (theo/entity inf-db :ex/bob))
 ;; => {:inferred {:ex/knows :ex/alice}}
 ```
+
+With no data, `rules/inf-model` infers over a new in-memory Model. For
+inference over existing data, pass a db, a Model or a Graph, e.g.
+`(theo/union-graph tdb2-db)`, and pass a schema before the data when it
+has one.
 
 For backward rules, add `rules/table-all` to the rules, so that a
 symmetric rule such as this one doesn't loop. Jena's own OWL rules are
@@ -481,7 +515,9 @@ returns a db, these are the ones you'll most often want:
   Fuseki.
 - :executor, a thread pool that runs the queries, so that the timeout holds
   even where Jena doesn't check it, e.g. in a rule reasoner. A pool with no
-  queue turns down queries when it's busy.
+  queue turns down queries when it's busy. `(txn/executor)` makes one with
+  a thread for each processor, `(txn/executor 4)` one with 4 threads, and
+  `(txn/executor {:queue 10})` lets 10 queries wait.
 - :max-bytes, the most that the body of a request may hold, 1 MB by
   default. A larger body gets a 413 before the endpoint reads it all.
 - :forms, the forms of query that may run, e.g. #{:select :ask}
@@ -568,6 +604,8 @@ between the two:
 
 - `theo/jena-model`, `theo/jena-dataset` and `theo/jena-graph`, for the
   Model, Dataset and Graph of a db;
+- `tdb2/dataset-graph`, for the DatasetGraph of a db of TDB2, e.g. for
+  Jena's DatabaseMgr;
 - `convert/node` and `convert/triples`, for Clojure data as Jena nodes and
   triples;
 - `convert/data`, for a Jena node as the value that `theo/q` returns;

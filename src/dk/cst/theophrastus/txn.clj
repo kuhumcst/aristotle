@@ -11,8 +11,10 @@
   none, so the code runs without one: other threads see its writes, and a
   failure partway through doesn't undo them. The in-memory db that theo/db
   makes has transactions unless :transactional? is false."
-  (:import [java.util.concurrent ExecutionException ExecutorService Future
-            RejectedExecutionException TimeUnit TimeoutException]
+  (:import [java.util.concurrent ArrayBlockingQueue BlockingQueue
+            ExecutionException ExecutorService Future
+            RejectedExecutionException SynchronousQueue ThreadPoolExecutor
+            TimeUnit TimeoutException]
            [java.util.function Supplier]
            [org.apache.jena.graph Graph]
            [org.apache.jena.query Dataset]
@@ -110,3 +112,33 @@
          (throw e#))
        (catch ExecutionException e#
          (throw (.getCause e#))))))
+
+(defn executor
+  "A pool of `n` threads with these `opts`, for with-hard-timeout and the
+  :executor of the endpoint. Without `n`, it has a thread for each
+  processor of the JVM, and the `opts` may come alone:
+
+  - :queue, the most calls that may wait for a thread (0 when not given),
+    so that a pool with no queue rejects a call when all its threads are
+    busy.
+  - :name, the prefix of the names of its threads (theophrastus when not
+    given), e.g. for a thread dump.
+
+  Its threads are daemons, so a call that ran out of time can't keep the
+  JVM running."
+  (^ExecutorService []
+   (executor {}))
+  (^ExecutorService [x]
+   (if (map? x)
+     (executor (.availableProcessors (Runtime/getRuntime)) x)
+     (executor x nil)))
+  (^ExecutorService [n {:keys [queue] prefix :name
+                        :or   {queue 0 prefix "theophrastus"}}]
+   (let [^BlockingQueue q (if (pos? queue)
+                            (ArrayBlockingQueue. (int queue))
+                            (SynchronousQueue.))]
+     (ThreadPoolExecutor. (int n) (int n) 0 TimeUnit/MILLISECONDS q
+                          (-> (Thread/ofPlatform)
+                              (.name (str prefix "-") 0)
+                              (.daemon true)
+                              (.factory))))))

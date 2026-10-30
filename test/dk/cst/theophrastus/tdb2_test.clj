@@ -1,6 +1,7 @@
 (ns dk.cst.theophrastus.tdb2-test
-  "Connecting to a TDB2 database on disk, and compacting it."
+  "Connecting to a TDB2 database on disk, compacting it and backing it up."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [dk.cst.theophrastus :as theo]
             [dk.cst.theophrastus.tdb2 :as tdb2]
@@ -40,6 +41,23 @@
         (is (.exists (io/file dir "Data-0003")) "a view of a graph works too")
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not a db of a TDB2"
                               (tdb2/compact! (theo/db))))
+        (release db))
+      (finally
+        (doseq [f (reverse (file-seq (io/file dir)))]
+          (io/delete-file f true))))))
+
+(deftest backup
+  (let [dir (str (Files/createTempDirectory "theophrastus"
+                                            (make-array FileAttribute 0)))]
+    (try
+      (let [db (tdb2/connect dir {:prefixes prefixes})]
+        (theo/transact! db [[:ex/s :ex/p "o"]])
+        (let [f (io/file (tdb2/backup (theo/named-graph db :ex/g)))]
+          (is (.exists f) "a view of a graph backs up the whole database")
+          (is (= "Backups" (.getName (.getParentFile f))))
+          (is (str/ends-with? (.getName f) ".nq.gz")))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not a db of a TDB2"
+                              (tdb2/backup (theo/db))))
         (release db))
       (finally
         (doseq [f (reverse (file-seq (io/file dir)))]

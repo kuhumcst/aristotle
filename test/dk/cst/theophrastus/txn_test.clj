@@ -125,3 +125,35 @@
           "an executor without a queue, whose only thread is busy")
       (finally
         (.shutdownNow executor)))))
+
+(deftest executor
+  (let [pool (txn/executor 1 {:name "test"})]
+    (try
+      (is (= ["test-0" true]
+             @(.submit pool ^Callable #(let [t (Thread/currentThread)]
+                                         [(.getName t) (.isDaemon t)])))
+          "named daemon threads")
+      (finally
+        (.shutdownNow pool))))
+  (doseq [^ThreadPoolExecutor pool [(txn/executor) (txn/executor {:queue 1})]]
+    (try
+      (is (= (.availableProcessors (Runtime/getRuntime))
+             (.getMaximumPoolSize pool))
+          "a thread for each processor")
+      (finally
+        (.shutdownNow pool))))
+  (let [pool (txn/executor 1)]
+    (try
+      (.submit pool ^Callable #(Thread/sleep 500))
+      (is (thrown-with-msg? TimeoutException #"rejected"
+                            (txn/with-hard-timeout pool 1000 :ok))
+          "no queue, so a call is rejected when the thread is busy")
+      (finally
+        (.shutdownNow pool))))
+  (let [pool (txn/executor 1 {:queue 1})]
+    (try
+      (.submit pool ^Callable #(Thread/sleep 100))
+      (is (= :ok (txn/with-hard-timeout pool 1000 :ok))
+          "a call waits in the queue")
+      (finally
+        (.shutdownNow pool)))))

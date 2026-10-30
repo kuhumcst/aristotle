@@ -11,15 +11,17 @@
             [dk.cst.theophrastus.term :as term])
   (:import [dk.cst.theophrastus Db]
            [clojure.lang ExceptionInfo]
-           [java.io File]
+           [java.io ByteArrayInputStream ByteArrayOutputStream File
+            StringReader]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [org.apache.jena.graph Graph GraphMemFactory Node]
-           [org.apache.jena.query Dataset Query QueryCancelledException
-            QueryParseException]
+           [org.apache.jena.query Dataset DatasetFactory Query
+            QueryCancelledException QueryParseException]
            [org.apache.jena.rdf.model Model ModelFactory]
            [org.apache.jena.reasoner ReasonerRegistry]
            [org.apache.jena.riot RDFDataMgr]
+           [org.apache.jena.shared AddDeniedException]
            [org.apache.jena.tdb2 TDB2 TDB2Factory]
            [org.apache.jena.tdb2.sys TDBInternal]))
 
@@ -540,6 +542,67 @@
            (theo/pull db [:ex/_friends] :ex/luke))
         "the links to a subject too")))
 
+(defn graphs-db
+  "A db of the Dataset `ds`, with a triple in its default graph and one in
+  each of the graphs ex:g1 and ex:g2."
+  [ds]
+  (let [db (theo/db ds {:prefixes prefixes})]
+    (theo/transact! db [[:ex/d :ex/p "d"]])
+    (theo/transact! (theo/named-graph db :ex/g1) [[:ex/a :ex/p "a"]])
+    (theo/transact! (theo/named-graph db :ex/g2) [[:ex/b :ex/p "b"]])
+    db))
+
+(defn subjects
+  "The subjects of the default graph of `db`, as a query reads it."
+  [db]
+  (set (map '?s (theo/q db "SELECT ?s WHERE { ?s ?p ?o }"))))
+
+(deftest default-graph-option
+  (doseq [ds [(DatasetFactory/createTxnMem) (TDB2Factory/createDataset)]
+          :let [_  (graphs-db ds)
+                at #(theo/db ds {:prefixes prefixes :default-graph %})]]
+    (is (= #{:ex/d} (subjects (at nil))))
+    (is (= #{:ex/a} (subjects (at :ex/g1))) "a named graph")
+    (is (= #{:ex/a :ex/b} (subjects (at #{:ex/g1 "<http://example.com/g2>"})))
+        "the union of a set of graphs")
+    (is (= #{:ex/a :ex/b} (subjects (at :union)))
+        "the union of the named graphs")
+    (is (= #{:ex/a :ex/b}
+           (set (map '?s (theo/q (at :ex/g1)
+                                 "SELECT ?s { GRAPH ?g { ?s ?p ?o } }"))))
+        "GRAPH still sees every named graph")
+    (is (= "b" (:ex/p (theo/entity (at :union) :ex/b))) "entity reads it too")
+    (is (= [[:ex/a :ex/p "a"]] (theo/triples (at :ex/g1) '[_ _ _])))
+    (is (= #{:ex/a} (subjects (theo/default-graph (at :ex/g1)))))
+    (theo/transact! (at :ex/g1) [[:ex/n :ex/p "n"]])
+    (theo/update! (at :ex/g1) "INSERT DATA { ex:u ex:p \"u\" }")
+    (is (= #{:ex/a :ex/n :ex/u} (subjects (theo/named-graph (at nil) :ex/g1)))
+        "writes go into the graph")
+    (doseq [x [:union #{:ex/g1 :ex/g2}]]
+      (is (thrown? AddDeniedException
+                   (theo/transact! (at x) [[:ex/x :ex/p "x"]])))
+      (is (thrown? AddDeniedException
+                   (theo/update! (at x) "INSERT DATA { ex:x ex:p \"x\" }"))
+          "a union can only be read"))
+    (is (= #{:ex/d} (subjects (at nil))) "the default graph is as it was"))
+  (is (thrown-with-msg? ExceptionInfo #"A Model has no named graphs"
+                        (theo/db (ModelFactory/createDefaultModel)
+                                 {:default-graph :union})))
+  (is (thrown-with-msg? ExceptionInfo #"Not a graph name"
+                        (theo/db {:default-graph :nope/g}))))
+
+(deftest transact-db
+  (let [tdb2 (theo/transact! (theo/db (TDB2Factory/createDataset)
+                                      {:prefixes prefixes})
+                             [[:ex/a :ex/knows :ex/b]])
+        copy (theo/db {:prefixes prefixes})]
+    (theo/transact! copy tdb2)
+    (is (= :ex/b (:ex/knows (theo/entity copy :ex/a))) "a db of TDB2")
+    (theo/transact! copy (theo/q tdb2 (str "CONSTRUCT { ?b ex:knows ?a } "
+                                           "WHERE { ?a ex:knows ?b }")))
+    (is (= :ex/a (:ex/knows (theo/entity copy :ex/b)))
+        "the db of a CONSTRUCT")))
+
 (deftest map-form
   (let [m  (ModelFactory/createDefaultModel)
         db (theo/db m {:prefixes prefixes})]
@@ -615,6 +678,35 @@
         "Turtle gives the blank nodes new labels"))
   (is (thrown-with-msg? ExceptionInfo #"Not a syntax for one graph"
                         (theo/write (first (people-dbs)) (temp-file ".nq" "")))))
+
+(deftest syntax-option
+  (let [ttl "<http://example.com/s> <http://example.com/p> <o> ."
+        nt  (str "<http://example.com/s> <http://example.com/p> "
+                 "<http://example.com/o> .\n")
+        db  (theo/db {:prefixes prefixes})]
+    (theo/read! db (StringReader. ttl)
+                {:syntax :ttl :base "http://example.com/"})
+    (is (= :ex/o (:ex/p (theo/entity db :ex/s))) "a Reader, with a base")
+    (theo/read! (theo/named-graph db :ex/g)
+                (ByteArrayInputStream. (.getBytes nt "UTF-8"))
+                {:syntax "application/n-triples"})
+    (is (= 1 (graph-size db "http://example.com/g")) "an InputStream")
+    (is (= nt (with-out-str (theo/write db *out* {:syntax :nt}))) "a Writer")
+    (let [out (ByteArrayOutputStream.)]
+      (theo/write db out {:syntax "text/turtle"})
+      (is (str/includes? (str out) "ex:s") "an OutputStream"))
+    (let [f (temp-file ".txt" "")]
+      (theo/write db f {:syntax :turtle})
+      (theo/read! (theo/named-graph db :ex/txt) f {:syntax :turtle})
+      (is (= 1 (graph-size db "http://example.com/txt"))
+          "a :syntax wins over the name of a file"))
+    (is (thrown-with-msg? ExceptionInfo #"A stream needs a :syntax"
+                          (theo/read! db (StringReader. ttl))))
+    (is (thrown-with-msg? ExceptionInfo #"No RDF syntax for :nope"
+                          (theo/read! db (StringReader. ttl) {:syntax :nope})))
+    (is (thrown-with-msg? ExceptionInfo #"Not a syntax for one graph"
+                          (theo/write db *out*
+                                      {:syntax "application/n-quads"})))))
 
 (def census-prefixes
   "The prefixes of Aristotle's query tests on the census data."
@@ -710,3 +802,12 @@
                                       "LOAD <file:///nowhere/at/all.ttl>"))))
     (is (= "Luke" (:ex/name (theo/entity db :ex/luke)))
         "a failure undoes the whole request on TDB2")))
+
+(deftest update-options
+  (let [db (theo/db {:prefixes prefixes})]
+    (theo/update! db (theo/parse-update "INSERT DATA { <s> ex:p \"o\" }"
+                                        prefixes
+                                        "http://example.com/"))
+    (is (= "o" (:ex/p (theo/entity db :ex/s))) "a relative IRI and a base")
+    (theo/update! db "INSERT DATA { ex:t ex:p \"o\" }" nil {:timeout 10000})
+    (is (= "o" (:ex/p (theo/entity db :ex/t))) "a timeout")))

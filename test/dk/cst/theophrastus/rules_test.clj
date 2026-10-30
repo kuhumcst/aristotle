@@ -77,6 +77,27 @@
     (is (= {:ex/knows :ex/a} (:inferred (meta (theo/entity db :ex/b))))
         "an inference Model on the union of a TDB2 dataset")))
 
+(deftest inf-model-sources
+  (let [reasoner (rules/reasoner (rules/parse rule-text))
+        db       (theo/db (rules/inf-model reasoner) {:prefixes prefixes})]
+    (theo/transact! db data)
+    (is (= {:ex/knows :ex/a} (:inferred (meta (theo/entity db :ex/b))))
+        "a new in-memory Model"))
+  (let [reasoner  (rules/reasoner (rules/parse rule-text))
+        base      (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})
+        _         (theo/transact! (theo/named-graph base :ex/g) data)
+        schema-db (theo/transact! (theo/db {:prefixes       prefixes
+                                            :transactional? false})
+                                  schema)
+        db        (theo/db (rules/inf-model reasoner
+                                            schema-db
+                                            (theo/union-graph base))
+                           {:prefixes prefixes})]
+    (is (= #{:ex/Dog :ex/Animal} (:rdf/type (theo/entity db :ex/rex)))
+        "dbs as the schema and the data"))
+  (is (thrown-with-msg? ExceptionInfo #"Not a db, Model or Graph"
+                        (rules/inf-model (rules/reasoner []) "data"))))
+
 (deftest rule-sets
   (is (seq rules/owl-rules))
   (is (seq rules/owl-mini-rules))
