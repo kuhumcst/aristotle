@@ -89,7 +89,7 @@
      :construct graphs
      :describe  graphs}))
 
-(def safety
+(def safety-headers
   "The headers of every response of the endpoint. Its bodies are data, often
   made from what clients wrote, so a browser mustn't take them for another
   type, nor run anything in them."
@@ -112,7 +112,7 @@
   - :media-types and :aliases, the formats of the result of each form of
     query, the vars of the same names
   - :format-param, the query parameter that names a format, format
-  - :headers, the headers of every response, safety
+  - :headers, the headers of every response, safety-headers
 
   The steps take more options that have no default, e.g. :limit, and
   handle lists them all."
@@ -126,7 +126,7 @@
    :media-types  media-types
    :aliases      aliases
    :format-param "format"
-   :headers      safety})
+   :headers      safety-headers})
 
 (defn- failure
   "The operation `op` with an :error of the `status`, `type` and
@@ -322,9 +322,9 @@
   and the IRI `base`, or with an :error when it doesn't parse as a query."
   [{:keys [query] :as op} prefixes base]
   (try
-    (assoc op :sparql (theo/query query prefixes base))
+    (assoc op :sparql (theo/parse-query query prefixes base))
     (catch QueryParseException e
-      (if (try (theo/update-request query prefixes) (catch Exception _ nil))
+      (if (try (theo/parse-update query prefixes) (catch Exception _ nil))
         (failure op 400 :update-not-allowed "Updates aren't allowed.")
         (failure op 400 :parse-error (ex-message e))))))
 
@@ -493,7 +493,7 @@
                (dataset-graph db))
         q    (cond-> sparql desc (without-dataset))]
     (txn/calculate-read
-      (theo/store db)
+      db
       #(with-open [qe (.build (exec-builder db q dsg opts))]
          (case form
            :select (ResultSetMem. (ResultSet/adapt (.select qe)))
@@ -749,7 +749,7 @@
       (throw (ex-info (str "Not a valid option: " k " " (pr-str v))
                       {:option k :value v})))))
 
-(defn ->config
+(defn config
   "The config of handle of the `opts`, over defaults. It throws when an
   option has a value of the wrong kind, e.g. when there is no :db."
   [opts]

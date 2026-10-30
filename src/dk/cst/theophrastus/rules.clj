@@ -56,7 +56,7 @@
   "The largest set of OWL rules that Jena supports, as a vector."
   (vec (.getRules ^RuleReasoner (ReasonerRegistry/getOWLReasoner))))
 
-(def mini-rules
+(def owl-mini-rules
   "The OWL rules of Jena's mini reasoner, as a vector."
   (vec (.getRules ^RuleReasoner (ReasonerRegistry/getOWLMiniReasoner))))
 

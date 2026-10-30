@@ -174,7 +174,7 @@ anything, and run a SPARQL Update with `theo/update!`:
 ```
 
 To parse an update once and run it often, pass the result of
-`theo/update-request` to `theo/update!`.
+`theo/parse-update` to `theo/update!`.
 
 Read RDF files with `theo/read!` and write one with `theo/write`. The file
 name gives the syntax, e.g. Turtle for .ttl, and all the files are parsed
@@ -236,9 +236,9 @@ the WHERE clause:
 A SELECT returns a vector of maps of variable to value, an ASK a boolean,
 and a CONSTRUCT or DESCRIBE a new db of the triples, in memory.
 
-To parse a query once and run it often, pass the result of `theo/query` to
-`theo/q`. After the bindings, an options map can set a `:timeout` in
-milliseconds. Jena only checks it when the query moves on to its next
+To parse a query once and run it often, pass the result of
+`theo/parse-query` to `theo/q`. After the bindings, an options map can set
+a `:timeout` in milliseconds. Jena only checks it when the query moves on to its next
 result, so for a hard limit, see `txn/with-hard-timeout`.
 
 For a result too large to hold in memory, `theo/reducible` takes the same
@@ -325,12 +325,12 @@ Transactions and TDB2
 The functions that end in `!` each write in one transaction, and `theo/q`,
 `theo/triples`, `theo/entity` and `theo/pull` each read in one. To run
 several functions in one transaction, use the macros of the txn namespace
-with the Dataset or Model of the db, which `theo/store` returns:
+with the db:
 
 ```clojure
 (require '[dk.cst.theophrastus.txn :as txn])
 
-(txn/with-write-transaction (theo/store db)
+(txn/with-write-transaction db
   (theo/retract! db [[:ex/alice :rdfs/label '_]])
   (theo/transact! db [[:ex/alice :rdfs/label "Alice Smith"]]))
 ```
@@ -340,7 +340,7 @@ writes some of the time, `txn/with-transaction` starts as a read and
 becomes a write at the first write:
 
 ```clojure
-(txn/with-transaction (theo/store db)
+(txn/with-transaction db
   (when-not (theo/entity db :ex/bob)
     (theo/transact! db [[:ex/bob :rdfs/label "Bob"]])))
 ```
@@ -396,7 +396,7 @@ its inference Model:
 
 For backward rules, add `rules/table-all` to the rules, so that a
 symmetric rule such as this one doesn't loop. Jena's own OWL rules are
-`rules/owl-rules` and `rules/mini-rules`.
+`rules/owl-rules` and `rules/owl-mini-rules`.
 
 Register a Clojure function for SPARQL with `function/register!`. It
 takes and returns the same values as the query that calls it, and a nil
@@ -427,7 +427,7 @@ data, with the same values as a query and the sh prefix for SHACL's terms:
 (:conforms? report)
 ;; => false
 
-(-> report :entries first (select-keys [:focus-node :path :severity]))
+(-> report :results first (select-keys [:focus-node :path :severity]))
 ;; => {:focus-node :ex/alice :path :ex/age :severity :sh/Violation}
 ```
 
@@ -534,9 +534,9 @@ These are the choices that the standards leave open:
   a request wherever the query says, and Jena loads whatever class a java:
   IRI names, also when it isn't a function. Turn them on with :service?
   true and :java? true.
-- **Every response has the headers of `endpoint/safety`**, which tell a
-  browser not to sniff the type of the body or run anything in it, since
-  the bodies are data that clients may have written.
+- **Every response has the headers of `endpoint/safety-headers`**, which
+  tell a browser not to sniff the type of the body or run anything in it,
+  since the bodies are data that clients may have written.
 - **Without Accept**, results are in JSON, where Fuseki uses XML, and
   graphs in Turtle.
 - **RDF/XML is plain**, since Jena's pretty writer overflows the stack on
@@ -566,8 +566,8 @@ Jena's own API
 Where you need Jena's own API, e.g. to keep a ResultSet, these convert
 between the two:
 
-- `theo/store` and `theo/jena-graph`, for the Dataset or Model of a db and
-  its Graph;
+- `theo/jena-model`, `theo/jena-dataset` and `theo/jena-graph`, for the
+  Model, Dataset and Graph of a db;
 - `convert/node` and `convert/triples`, for Clojure data as Jena nodes and
   triples;
 - `convert/data`, for a Jena node as the value that `theo/q` returns;

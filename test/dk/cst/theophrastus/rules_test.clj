@@ -79,5 +79,5 @@
 
 (deftest rule-sets
   (is (seq rules/owl-rules))
-  (is (seq rules/mini-rules))
+  (is (seq rules/owl-mini-rules))
   (is (instance? Rule rules/table-all)))

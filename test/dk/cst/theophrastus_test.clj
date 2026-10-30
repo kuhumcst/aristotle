@@ -82,7 +82,9 @@
   (is (= term/default-prefixes (:prefixes (theo/db))))
   (let [db (theo/db {:prefixes prefixes})]
     (is (instance? Dataset (:dataset db)))
-    (is (identical? (:dataset db) (theo/store db)))
+    (is (identical? (:dataset db) (theo/jena-dataset db)))
+    (is (instance? Model (theo/jena-model db)) "the default Model")
+    (is (identical? (:dataset db) (txn/transactional db)))
     (theo/transact! db [[:ex/s :ex/p "o"]])
     (is (thrown? ExceptionInfo
                  (theo/transact! db [[:ex/s :ex/p "q"]
@@ -90,7 +92,8 @@
     (is (= 1 (graph-size db)) "a failed write is undone"))
   (let [db (theo/db {:prefixes prefixes :transactional? false})]
     (is (instance? Model (:model db)) "a plain Model")
-    (is (identical? (:model db) (theo/store db)))
+    (is (identical? (:model db) (theo/jena-model db)))
+    (is (nil? (theo/jena-dataset db)))
     (theo/transact! db [[:ex/s :ex/p "o"]])
     (is (= [{'?o "o"}] (theo/q db "SELECT ?o WHERE { ?s ?p ?o }")))
     (is (thrown-with-msg? ExceptionInfo #"A Model has no named graphs"
@@ -278,12 +281,14 @@
    (theo/transact! (theo/db (TDB2Factory/createDataset) {:prefixes prefixes})
                  label-data)])
 
-(deftest query
-  (is (instance? Query (theo/query "SELECT * WHERE { ?s rdfs:label ?l }"))
+(deftest parse-query
+  (is (instance? Query
+                 (theo/parse-query "SELECT * WHERE { ?s rdfs:label ?l }"))
       "the default prefixes need no PREFIX line")
-  (is (instance? Query (theo/query "SELECT * WHERE { ?s ex:p ?o }" prefixes)))
+  (is (instance? Query
+                 (theo/parse-query "SELECT * WHERE { ?s ex:p ?o }" prefixes)))
   (is (thrown? QueryParseException
-               (theo/query "SELECT * WHERE { ?s ex:p ?o }"))
+               (theo/parse-query "SELECT * WHERE { ?s ex:p ?o }"))
       "ex isn't one of the default prefixes"))
 
 (deftest select
@@ -294,8 +299,8 @@
              {'?s '_part '?l "del"}}
            (set (theo/q db "SELECT * WHERE { ?s rdfs:label ?l }"))))
     (is (= [{'?s :ex/a}]
-           (theo/q db (theo/query "SELECT ?s WHERE { ?s ex:count 2 }"
-                                  prefixes)))
+           (theo/q db (theo/parse-query "SELECT ?s WHERE { ?s ex:count 2 }"
+                                        prefixes)))
         "a Query, and an integer in SPARQL matching a Clojure integer")))
 
 (deftest bindings
@@ -329,8 +334,7 @@
 
 (deftest reducible
   (doseq [db (label-dbs)
-          :let [labels "SELECT * WHERE { ?s rdfs:label ?l }"
-                store  (theo/store db)]]
+          :let [labels "SELECT * WHERE { ?s rdfs:label ?l }"]]
     (is (= (set (theo/q db labels)) (into #{} (theo/reducible db labels)))
         "the rows of q")
     (is (= (theo/q db labels {'?s :ex/b})
@@ -338,13 +342,13 @@
         "with bindings")
     (is (= 2 (count (into [] (take 2) (theo/reducible db labels))))
         "a reduction that stops early")
-    (is (= :ok (txn/calculate-write store (constantly :ok)))
+    (is (= :ok (txn/calculate-write db (constantly :ok)))
         "the transaction ended with the early stop")
     (is (thrown-with-msg? ExceptionInfo #"boom"
                           (reduce (fn [_ _] (throw (ex-info "boom" {})))
                                   nil
                                   (theo/reducible db labels))))
-    (is (= :ok (txn/calculate-write store (constantly :ok)))
+    (is (= :ok (txn/calculate-write db (constantly :ok)))
         "the transaction ended with the exception")
     (is (thrown-with-msg? ExceptionInfo #"Not a SELECT"
                           (theo/reducible db "ASK { ?s ?p ?o }")))
@@ -684,8 +688,8 @@
           :let [name-of #(:ex/name (theo/entity db %))]]
     (is (identical? db (theo/update! db "INSERT DATA { ex:x ex:name \"X\" }")))
     (is (= "X" (name-of :ex/x)) "the prefixes of the db need no PREFIX line")
-    (theo/update! db (theo/update-request "INSERT DATA { ex:y ex:name \"Y\" }"
-                                          prefixes))
+    (theo/update! db (theo/parse-update "INSERT DATA { ex:y ex:name \"Y\" }"
+                                        prefixes))
     (is (= "Y" (name-of :ex/y)) "an UpdateRequest")
     (theo/update! db "DELETE { ?s ex:name ?n } INSERT { ?s ex:name ?u }
                      WHERE { ?s ex:name ?n BIND (UCASE(?n) AS ?u) }"

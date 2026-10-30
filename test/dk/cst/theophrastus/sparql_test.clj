@@ -14,7 +14,7 @@
 
 (def labels
   "The query of the labels of ?s."
-  (theo/query "SELECT ?l WHERE { ?s rdfs:label ?l }" prefixes))
+  (theo/parse-query "SELECT ?l WHERE { ?s rdfs:label ?l }" prefixes))
 
 (defn label-db
   "A db with a label for :ex/a and one for :ex/b."
@@ -32,11 +32,11 @@
 (deftest query-exec
   (let [db    (label-db)
         query (sparql/bind labels {'?s :ex/a} prefixes)]
-    (txn/with-read-transaction (theo/store db)
+    (txn/with-read-transaction db
       (with-open [qe (.build (sparql/query-exec-builder db query nil))]
         (is (= [{'?l "A"}]
                (mapv #(sparql/row % prefixes) (iterator-seq (.select qe)))))))
-    (txn/with-read-transaction (theo/store db)
+    (txn/with-read-transaction db
       (with-open [qe (.build (sparql/query-exec-builder db labels nil))]
         (is (= #{"A" "B"}
                (sparql/reduce-rows #(conj %1 (get %2 '?l)) #{} (.select qe)
@@ -44,8 +44,8 @@
 
 (deftest update-exec
   (let [db      (label-db)
-        request (theo/update-request "DELETE WHERE { ?s rdfs:label ?l }"
-                                     prefixes)]
-    (txn/with-write-transaction (theo/store db)
+        request (theo/parse-update "DELETE WHERE { ?s rdfs:label ?l }"
+                                   prefixes)]
+    (txn/with-write-transaction db
       (.execute (.build (sparql/update-exec-builder db request {'?s :ex/a}))))
     (is (= [{'?l "B"}] (theo/q db labels)) "only the bound subject")))

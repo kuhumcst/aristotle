@@ -19,7 +19,7 @@
   graphs), and delete the generation it replaces. TDB2 only frees the space
   of deleted and changed data when it compacts."
   [db]
-  (let [t   (txn/transactional (theo/store db))
+  (let [t   (txn/transactional db)
         dsg (if (instance? Dataset t) (.asDatasetGraph ^Dataset t) t)]
     (if (and dsg (DatabaseMgr/isTDB2 ^DatasetGraph dsg))
       (DatabaseMgr/compact dsg true)

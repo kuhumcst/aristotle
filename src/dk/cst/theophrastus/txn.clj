@@ -1,5 +1,6 @@
 (ns dk.cst.theophrastus.txn
-  "Transactions on a Jena Graph, Model or Dataset, and a hard timeout.
+  "Transactions on a db or a Jena Graph, Model or Dataset, and a hard
+  timeout.
 
   Each kind of transaction has a function that calls a function of no
   arguments (e.g. calculate-read) and a macro that runs a body (e.g.
@@ -21,8 +22,8 @@
            [org.apache.jena.system Txn]))
 
 (defn transactional
-  "The dataset whose transactions `x` (a Graph, Model or Dataset) uses, or
-  nil when there is none."
+  "The dataset whose transactions `x` (a db, Graph, Model or Dataset) uses,
+  or nil when there is none."
   ^Transactional [x]
   (cond
     (instance? Dataset x)      (when (.supportsTransactions ^Dataset x) x)
@@ -31,7 +32,9 @@
     (instance? GraphView x)    (transactional (.getDataset ^GraphView x))
     (instance? InfGraph x)     (transactional (.getRawGraph ^InfGraph x))
     (instance? Graph x)        nil
-    :else (throw (ex-info (str "Not a Graph, Model or Dataset: " x)
+    ;; a db, whose namespace requires this one
+    (map? x)                   (transactional (or (:dataset x) (:model x)))
+    :else (throw (ex-info (str "Not a db, Graph, Model or Dataset: " x)
                           {:x x}))))
 
 ;; named after the methods of Jena's Txn that they call

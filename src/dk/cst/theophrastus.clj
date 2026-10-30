@@ -93,11 +93,15 @@
      :else
      (throw (ex-info (str "Not a Model, Dataset or Graph: " x) {:x x})))))
 
-(defn store
-  "The Dataset or Model of `db`, which the functions of the txn namespace
-  take."
-  [{:keys [model dataset] :as db}]
-  (or dataset model))
+(defn jena-model
+  "The Jena Model of `db`: its Model, or its Dataset's default Model."
+  ^Model [{:keys [^Model model ^Dataset dataset] :as db}]
+  (or model (.getDefaultModel dataset)))
+
+(defn jena-dataset
+  "The Jena Dataset of `db`, or nil when it's a db of a Model."
+  ^Dataset [{:keys [dataset] :as db}]
+  dataset)
 
 (defn jena-graph
   "The Jena Graph of `db`: its Model's graph, or its Dataset's default
@@ -115,21 +119,21 @@
     db))
 
 (defn named-graph
-  "A db of the named `graph` of `db`, with the same prefixes. The graph is
-  an IRI, e.g. a keyword, and the first write to it adds it to the Dataset.
-  Writes go into the Dataset, in its transactions."
-  [{:keys [dataset prefixes] :as db} graph]
-  (let [iri (term/iri graph prefixes)]
+  "A db of the graph named `graph-name` in `db`, with the same prefixes. The
+  name is an IRI, e.g. a keyword, and the first write to the graph adds it
+  to the Dataset. Writes go into the Dataset, in its transactions."
+  [{:keys [dataset prefixes] :as db} graph-name]
+  (let [iri (term/iri graph-name prefixes)]
     (cond
       (nil? dataset)
-      (throw (ex-info "A Model has no named graphs" {:graph graph}))
+      (throw (ex-info "A Model has no named graphs" {:graph-name graph-name}))
 
       iri
       (->Db (.getNamedModel ^Dataset dataset ^String iri) nil prefixes)
 
       :else
-      (throw (ex-info (str "Not a graph name: " (pr-str graph))
-                      {:graph graph})))))
+      (throw (ex-info (str "Not a graph name: " (pr-str graph-name))
+                      {:graph-name graph-name})))))
 
 (defn union-graph
   "A read-only db of the union of the named graphs in `db`, with the same
@@ -162,7 +166,7 @@
                  (instance? Graph tx-data) tx-data
                  (instance? Model tx-data) (.getGraph ^Model tx-data)
                  :else (convert/triples tx-data prefixes))]
-    (txn/calculate-write (store db)
+    (txn/calculate-write db
                          #(let [g (jena-graph db)]
                             (if (instance? Graph source)
                               (GraphUtil/addInto g ^Graph source)
@@ -180,7 +184,7 @@
   [{:keys [prefixes] :as db} patterns]
   (let [nodes (mapv #(convert/pattern->nodes % prefixes)
                     (if (convert/triple? patterns) [patterns] patterns))]
-    (txn/calculate-write (store db)
+    (txn/calculate-write db
                          #(let [g (jena-graph db)]
                             (doseq [[s p o] nodes]
                               (.remove g s p o))))
@@ -203,7 +207,7 @@
   [db target]
   (let [f    (io/file target)
         lang (files/syntax f)]
-    (txn/calculate-read (store db)
+    (txn/calculate-read db
                         #(with-open [out (io/output-stream f)]
                            (RDFDataMgr/write out (jena-graph db) lang)))
     db))
@@ -244,15 +248,15 @@
   [items]
   (rdf-container :rdf/Seq items))
 
-(defn query
+(defn parse-query
   "The Jena Query of the SPARQL string `s`, parsed with the `prefixes` set
   (term/default-prefixes when none are given), so that `s` needs no PREFIX
   lines for them. A relative IRI in `s` resolves against the IRI `base`,
   when given."
   (^Query [s]
-   (query s term/default-prefixes))
+   (parse-query s term/default-prefixes))
   (^Query [s prefixes]
-   (query s prefixes nil))
+   (parse-query s prefixes nil))
   (^Query [s prefixes base]
    (let [q (doto (Query.)
              (.setPrefixMapping (convert/prefix-mapping prefixes)))]
@@ -292,12 +296,12 @@
   ([db x bindings]
    (q db x bindings nil))
   ([{:keys [prefixes] :as db} x bindings opts]
-   (let [bound   (sparql/bind (if (string? x) (query x prefixes) x)
+   (let [bound   (sparql/bind (if (string? x) (parse-query x prefixes) x)
                               bindings
                               prefixes)
          builder (sparql/query-exec-builder db bound opts)]
      (txn/calculate-read
-       (store db)
+       db
        #(with-open [qe (.build builder)]
           (cond
             (.isSelectType bound)    (persistent!
@@ -327,7 +331,7 @@
   ([db x bindings]
    (reducible db x bindings nil))
   ([{:keys [prefixes] :as db} x bindings opts]
-   (let [bound   (sparql/bind (if (string? x) (query x prefixes) x)
+   (let [bound   (sparql/bind (if (string? x) (parse-query x prefixes) x)
                               bindings
                               prefixes)
          builder (sparql/query-exec-builder db bound opts)]
@@ -336,16 +340,16 @@
      (reify IReduceInit
        (reduce [_ f init]
          (txn/calculate-read
-           (store db)
+           db
            #(with-open [qe (.build builder)]
               (sparql/reduce-rows f init (.select qe) prefixes))))))))
 
-(defn update-request
+(defn parse-update
   "The Jena UpdateRequest of the SPARQL Update string `s`, parsed with the
   `prefixes` set (term/default-prefixes when none are given), so that `s`
   needs no PREFIX lines for them."
   (^UpdateRequest [s]
-   (update-request s term/default-prefixes))
+   (parse-update s term/default-prefixes))
   (^UpdateRequest [s prefixes]
    (doto (UpdateRequest.)
      (.setPrefixMapping (convert/prefix-mapping prefixes))
@@ -361,9 +365,9 @@
   ([db x]
    (update! db x nil))
   ([{:keys [prefixes] :as db} x bindings]
-   (let [request (if (string? x) (update-request x prefixes) x)
+   (let [request (if (string? x) (parse-update x prefixes) x)
          builder (sparql/update-exec-builder db request bindings)]
-     (txn/calculate-write (store db) #(.execute (.build builder)))
+     (txn/calculate-write db #(.execute (.build builder)))
      db)))
 
 ;; as TDB2's QueryEngineTDB checks it, with the context of the dataset over
@@ -403,7 +407,7 @@
   transaction."
   [{:keys [prefixes] :as db} pattern]
   (txn/calculate-read
-    (store db)
+    db
     #(let [[^Node s ^Node p ^Node o] (convert/pattern->nodes pattern prefixes)]
        (into []
              (map (fn [^Triple t]
@@ -453,7 +457,7 @@
   schema). The entity is read in one read transaction."
   [{:keys [^Model model prefixes] :as db} subject]
   (txn/calculate-read
-    (store db)
+    db
     #(let [g               (query-graph db)
            subject-triples (fn [s]
                              (.toList (.find g (convert/node s prefixes)
@@ -499,7 +503,7 @@
   one read transaction."
   [{:keys [prefixes] :as db} pattern subject]
   (txn/calculate-read
-    (store db)
+    db
     #(let [g (query-graph db)]
        ;; as functions, since impl.entity can't require this namespace
        (entity/pull {:entity   (fn [s] (entity db s))

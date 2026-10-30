@@ -14,12 +14,12 @@ name:
 |------------------------------------------|---------------------------------------|
 | `(aa/graph :simple)`                     | `(theo/db)`                           |
 | `(aa/graph :jena-rules rules)`           | `theo/db` of a `rules/inf-model`      |
-| `(aa/graph :jena-mini)`                  | the same, with `rules/mini-rules`     |
+| `(aa/graph :jena-mini)`                  | the same, with `rules/owl-mini-rules` |
 | `aa/add`                                 | `theo/transact!`                      |
 | `aa/read`                                | `theo/read!`                          |
 | `(aa/write graph file format)`           | `(theo/write db file)`                |
 | `query/run` with the SPARQL algebra      | `theo/q` with SPARQL                  |
-| `query/build` and `query/parse`          | `theo/query`                          |
+| `query/build` and `query/parse`          | `theo/parse-query`                    |
 | `(query/pull graph subject pattern)`     | `(theo/pull db pattern subject)`      |
 | `graph/data`                             | `convert/data`                        |
 | `registry/prefix`, `registry/with`       | the `:prefixes` option of `theo/db`   |

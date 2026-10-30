@@ -28,16 +28,16 @@
   "The map of the report entry `e`, with `prefixes` for keywords."
   [^ReportEntry e prefixes]
   (let [value #(some-> ^Node % (convert/data prefixes))]
-    {:focus-node (value (.focusNode e))
-     :path       (let [^Path path (.resultPath e)]
-                   (if (instance? P_Link path)
-                     (value (.getNode ^P_Link path))
-                     (some-> path str)))
-     :value      (value (.value e))
-     :shape      (value (.source e))
-     :constraint (value (.sourceConstraintComponent e))
-     :message    (.message e)
-     :severity   (some-> (.severity e) (.level) value)}))
+    {:focus-node           (value (.focusNode e))
+     :path                 (let [^Path path (.resultPath e)]
+                             (if (instance? P_Link path)
+                               (value (.getNode ^P_Link path))
+                               (some-> path str)))
+     :value                (value (.value e))
+     :source-shape         (value (.source e))
+     :constraint-component (value (.sourceConstraintComponent e))
+     :message              (.message e)
+     :severity             (some-> (.severity e) (.level) value)}))
 
 ;; SHACL, section 3.6: a validation report has a result for each failure,
 ;; with its focus node, path, value, source shape, constraint component and
@@ -46,22 +46,22 @@
   "The map of the validation `report`, with `prefixes` for keywords."
   [^ValidationReport report prefixes]
   {:conforms? (.conforms report)
-   :entries   (mapv #(entry->map % prefixes) (.getEntries report))})
+   :results   (mapv #(entry->map % prefixes) (.getEntries report))})
 
 (defn validate
   "The SHACL report of `db` (or only of its `node`) against the `shapes`, as
-  a map of :conforms? and :entries. It's made in one read transaction.
+  a map of :conforms? and :results. It's made in one read transaction.
 
-  Each entry is a map of :focus-node, :path, :value, :shape, :constraint,
-  :message and :severity. Its keywords use the prefixes of `db`, and sh
-  for SHACL, e.g. :sh/Violation. A path that isn't a single predicate is a
-  string of SPARQL syntax."
+  Each result is a map of :focus-node, :path, :value, :source-shape,
+  :constraint-component, :message and :severity. Its keywords use the
+  prefixes of `db`, and sh for SHACL, e.g. :sh/Violation. A path that isn't
+  a single predicate is a string of SPARQL syntax."
   ([db shapes]
    (validate db shapes nil))
   ([{:keys [prefixes] :as db} ^Shapes shapes node]
    (let [prefixes (assoc prefixes :sh "<http://www.w3.org/ns/shacl#>")]
      (txn/calculate-read
-       (theo/store db)
+       db
        #(let [validator (ShaclValidator/get)
               g         (theo/jena-graph db)]
           (report->map (if (some? node)
@@ -71,12 +71,12 @@
                        prefixes))))))
 
 (defn by-severity
-  "The entries of the `report` grouped by their :severity."
+  "The results of the `report` grouped by their :severity."
   [report]
-  (group-by :severity (:entries report)))
+  (group-by :severity (:results report)))
 
 (defn violations?
-  "Whether the `report` has an entry of :sh/Violation, rather than only
+  "Whether the `report` has a result of :sh/Violation, rather than only
   :sh/Warning or :sh/Info."
   [report]
-  (boolean (some #(= :sh/Violation (:severity %)) (:entries report))))
+  (boolean (some #(= :sh/Violation (:severity %)) (:results report))))

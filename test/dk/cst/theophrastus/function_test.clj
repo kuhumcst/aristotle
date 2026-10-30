@@ -78,7 +78,8 @@
     (is (= "other"
            (with-open [^QueryExec qe (-> (QueryExec/graph
                                            (.getGraph ^Model (:model db)))
-                                         (.query (theo/query kind prefixes))
+                                         (.query (theo/parse-query kind
+                                                                   prefixes))
                                          (.build))]
              (convert/data (.get (.next (.select qe)) (Var/alloc "y"))
                            prefixes)))

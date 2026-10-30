@@ -6,7 +6,7 @@
   :dk.cst.theophrastus.endpoint/operation, and negotiate keeps its decision
   where conneg-clj does, under :dk.simongray.conneg/decision. They take the
   options of endpoint/handle over endpoint/defaults, and throw at once when
-  one is wrong, as endpoint/->config does.
+  one is wrong, as endpoint/config does.
 
   The interceptors are maps, so the library doesn't depend on Pedestal. A
   route takes them as they are. Elsewhere, pass each to
@@ -18,7 +18,7 @@
   "An interceptor that reads the operation of the request, as
   endpoint/operation does, with the `opts`."
   [opts]
-  (let [config (endpoint/->config opts)]
+  (let [config (endpoint/config opts)]
     {:name  ::operation
      :enter (fn [{:keys [request] :as ctx}]
               (assoc-in ctx [:request ::endpoint/operation]
@@ -28,7 +28,7 @@
   "An interceptor that prepares the operation of the request, as
   endpoint/prepare does, with the `opts`."
   [opts]
-  (let [config (endpoint/->config opts)]
+  (let [config (endpoint/config opts)]
     {:name  ::prepare
      :enter (fn [{:keys [request] :as ctx}]
               (let [prepare-opts (endpoint/prepare-opts config request)]
@@ -40,7 +40,7 @@
   operation, with the `opts`. It answers 406 when no media type is
   acceptable, which ends the chain."
   [opts]
-  (let [config (endpoint/->config opts)]
+  (let [config (endpoint/config opts)]
     {:name  ::negotiate
      :enter (fn [{:keys [request] :as ctx}]
               (let [op (::endpoint/operation request)]
@@ -58,7 +58,7 @@
   "An interceptor that runs the query of the operation, as endpoint/run
   does, with the `opts`."
   [opts]
-  (let [config (endpoint/->config opts)]
+  (let [config (endpoint/config opts)]
     {:name  ::run
      :enter (fn [{:keys [request] :as ctx}]
               (let [op       (::endpoint/operation request)
@@ -71,7 +71,7 @@
   "An interceptor that sets the response, as endpoint/respond does, with
   the `opts`."
   [opts]
-  (let [config (endpoint/->config opts)]
+  (let [config (endpoint/config opts)]
     {:name  ::respond
      :enter (fn [{:keys [request] :as ctx}]
               (assoc ctx :response

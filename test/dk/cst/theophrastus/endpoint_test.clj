@@ -386,9 +386,9 @@
                                     config))))
   (doseq [request [(get-request [["query" "ASK {}"]])
                    (get-request [["query" "ASK {"]])]]
-    (is (= endpoint/safety
+    (is (= endpoint/safety-headers
            (select-keys (:headers (endpoint/handle request config))
-                        (keys endpoint/safety)))
+                        (keys endpoint/safety-headers)))
         "the safety headers"))
   (is (= 1000 (:timeout (endpoint/run-opts {:timeout 5000}
                                            {:params {:timeout "1"}}))))
@@ -399,11 +399,12 @@
                                           {:params {:timeout "Infinity"}})))
       "a timeout that isn't finite counts as none"))
 
-(deftest ->config
-  (is (= (merge endpoint/defaults {:db 1}) (endpoint/->config {:db 1})))
+;; named so as not to clash with the config above
+(deftest checked-config
+  (is (= (merge endpoint/defaults {:db 1}) (endpoint/config {:db 1})))
   (doseq [opts [[] {} {:db 1 :timeout -1} {:db 1 :forms #{:update}}
                 {:db 1 :limit 1.5} {:db 1 :executor :pool}]]
-    (is (thrown? clojure.lang.ExceptionInfo (endpoint/->config opts))
+    (is (thrown? clojure.lang.ExceptionInfo (endpoint/config opts))
         (pr-str opts))))
 
 (defn- chain

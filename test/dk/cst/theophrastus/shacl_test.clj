@@ -47,22 +47,22 @@
             :let [_      (theo/transact! db data)
                   result (shacl/validate db shapes)
                   jim    (first (filter #(= :ex/jim (:focus-node %))
-                                        (:entries result)))]]
+                                        (:results result)))]]
       (is (false? (:conforms? result)))
-      (is (= 2 (count (:entries result))))
-      (is (= {:focus-node :ex/jim
-              :path       :ex/name
-              :value      nil
-              :shape      :ex/NameShape
-              :constraint :sh/MinCountConstraintComponent
-              :severity   :sh/Violation}
+      (is (= 2 (count (:results result))))
+      (is (= {:focus-node           :ex/jim
+              :path                 :ex/name
+              :value                nil
+              :source-shape         :ex/NameShape
+              :constraint-component :sh/MinCountConstraintComponent
+              :severity             :sh/Violation}
              (dissoc jim :message)))
       (is (string? (:message jim)))
       (is (shacl/violations? result))
       (is (= #{:sh/Violation :sh/Warning}
              (set (keys (shacl/by-severity result)))))
       (let [luke (shacl/validate db shapes :ex/luke)]
-        (is (= [:sh/Warning] (map :severity (:entries luke)))
+        (is (= [:sh/Warning] (map :severity (:results luke)))
             "only the node")
         (is (not (shacl/violations? luke)) "a warning isn't a violation"))
       (is (:conforms? (shacl/validate db shapes :ex/nobody))))))
