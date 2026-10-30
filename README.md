@@ -1,34 +1,37 @@
 Theophrastus
 ============
 
-This library lets you work with RDF as Clojure data, on top of
-[Apache Jena](https://jena.apache.org) 6. You keep the data in a Jena Model
-or Dataset, in memory or on disk with TDB2. Then you query it with SPARQL,
-read its subjects as maps and write Clojure data to it. The library was made
-for [DanNet](https://github.com/kuhumcst/DanNet), the Danish WordNet. It
-began as a fork of [Aristotle](https://github.com/arachne-framework/aristotle);
-see [From Aristotle](doc/from-aristotle.md) for what changed, and
-[Design](doc/design.md) for the decisions behind it.
+> [Aristotle][Aristotle the philosopher] bequeathed his own library to [Theophrastus], to whom he also left his school.
+>
+> — [Strabo], [_Geography_ 13.1.54][13.1.54]
 
-- **An API like Datomic's.** If you know Datomic, `q`, `entity`, `pull` and
-  `transact!` will look familiar. What they return follows RDF and SPARQL,
-  e.g. a property has one value or a set of them.
-- **SPARQL, with values as terms.** You write queries in SPARQL, or as data
-  with Flint. The values you bind go into a query as RDF terms, never as
-  text, so a value from a user can't change the query.
-- **Terms as Clojure values.** An IRI is a keyword or a string in angle
-  brackets, and a literal is a Clojure value. The terms also work in
-  ClojureScript, e.g. in EDN sent to a browser.
-- **Transactions.** Each write is one transaction wherever the store has
-  them, e.g. in TDB2, and you can group several writes in one.
-- **Rules, functions and SHACL.** Build an inference Model from Jena rules,
-  call Clojure functions from SPARQL, and get SHACL reports as data.
-- **A SPARQL endpoint.** Serve a db by the SPARQL 1.1 Protocol, from Ring
-  or Pedestal, in steps that you can also call or replace one by one.
-- **Close to the standards.** Where RDF, SPARQL or XSD has a rule, the code
-  follows it and cites it.
+At the [Centre for Language Technology] we have used [Aristotle] as our RDF library of choice for [DanNet] since we started building its new version in 2020. We even made a few contributions to Aristotle itself. Over the years we gained a lot of experience with the library and with [Apache Jena], which it wraps. Our needs led to several extensions, which piled up in the DanNet source code.
 
-> This library was developed with assistance from frontier LLMs.
+Theophrastus is our **total makeover** of Aristotle. It's based on Apache Jena 6 and adds:
+
+- an API more [like Datomic's]
+- support for persistent [TDB2] databases
+- transactions, which TDB2 needs
+- support for building a [SPARQL endpoint]
+- [SHACL] validation
+
+**NOTE:** we removed support for [Aristotle's query language] (based on [ARQ]). Complex queries were too hard to build with it, and it was poorly documented. Theophrastus still supports SPARQL, so you can write a query by hand or with any library that produces SPARQL, e.g. [Flint] for queries as Clojure data.
+
+[Centre for Language Technology]: https://cst.ku.dk/english
+[Aristotle]: https://github.com/arachne-framework/aristotle
+[DanNet]: https://github.com/kuhumcst/DanNet
+[Apache Jena]: https://jena.apache.org
+[Aristotle's query language]: https://github.com/arachne-framework/aristotle#query
+[ARQ]: https://www.w3.org/2011/09/SparqlAlgebra/ARQalgebra
+[like Datomic's]: https://docs.datomic.com/clojure/index.html
+[TDB2]: https://jena.apache.org/documentation/tdb2/
+[SPARQL endpoint]: https://www.w3.org/TR/sparql11-protocol/
+[SHACL]: https://www.w3.org/TR/shacl/
+[Flint]: https://github.com/yetanalytics/flint
+[Aristotle the philosopher]: https://en.wikipedia.org/wiki/Aristotle
+[Theophrastus]: https://en.wikipedia.org/wiki/Theophrastus
+[Strabo]: https://en.wikipedia.org/wiki/Strabo
+[13.1.54]: https://www.perseus.tufts.edu/hopper/text?doc=Perseus:text:1999.01.0198:book=13:chapter=1:section=54
 
 Getting started
 ---------------
