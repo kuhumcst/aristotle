@@ -67,6 +67,8 @@ prefix lets you write `<http://example.com/alice>` as `:ex/alice`:
                     [:ex/carol :rdfs/label "Carol"]])
 ```
 
+### Queries and lookups
+
 You can query the db with [SPARQL] (with optional bindings) or look up a
 single subject as a map:
 
@@ -92,6 +94,8 @@ You can also pull nested data with a [Datomic-style pattern]:
 ;;                   {:rdf/about :ex/carol :rdfs/label "Carol"}}}
 ```
 
+### Named graphs
+
 A [named graph] can be used as a db. So can the union of all the named
 graphs:
 
@@ -101,6 +105,8 @@ graphs:
 (theo/entity (theo/union-graph db) :ex/dave)
 ;; => {:rdf/about :ex/dave :rdfs/label "Dave"}
 ```
+
+### Persistence and transactions
 
 Write the data to a file and load it into a [TDB2] database on disk:
 
@@ -122,6 +128,8 @@ To run several operations in one transaction, use the txn macros:
   (theo/retract! tdb2-db [:ex/alice :rdfs/label '_])
   (theo/transact! tdb2-db [[:ex/alice :rdfs/label "Alice Smith"]]))
 ```
+
+### Inference and validation
 
 Inference uses [Jena rules]. This one makes `ex:knows` symmetric:
 
@@ -150,7 +158,9 @@ Inference uses [Jena rules]. This one makes `ex:knows` symmetric:
 ;;     :results   [{:focus-node :ex/alice :path :ex/age ...}]}
 ```
 
-You can also serve a db as a read-only [SPARQL endpoint] through a [Ring]
+### SPARQL endpoint
+
+You can serve a db as a read-only [SPARQL endpoint] through a [Ring]
 handler or [Pedestal interceptors]:
 
 ```clojure
