@@ -94,6 +94,16 @@ You can also pull nested data with a [Datomic-style pattern]:
 ;;                   {:rdf/about :ex/carol :rdfs/label "Carol"}}}
 ```
 
+A string with a language tag, such as `'爱丽丝'@zh` in SPARQL or [Turtle],
+is a langstring in Clojure:
+
+```clojure
+(theo/update! db "INSERT DATA { ex:alice rdfs:label '爱丽丝'@zh }")
+
+(:rdfs/label (theo/entity db :ex/alice))
+;; => #{"Alice" #rdf/langstring ["爱丽丝" "zh"]}
+```
+
 ### Named graphs
 
 A [named graph] can be used as a db. So can the union of all the named
@@ -232,6 +242,7 @@ the [NOTICE](NOTICE)).
 [SPARQL]: https://www.w3.org/TR/sparql11-query/
 [Datomic-style pattern]: https://docs.datomic.com/query/query-pull.html
 [named graph]: https://www.w3.org/TR/rdf11-concepts/#section-dataset
+[Turtle]: https://www.w3.org/TR/turtle/
 [Jena rules]: https://jena.apache.org/documentation/inference/#rules
 [Ring]: https://github.com/ring-clojure/ring
 [Pedestal interceptors]: https://pedestal.io/pedestal/0.7/guides/what-is-an-interceptor.html
