@@ -59,10 +59,12 @@
 
 (defn iri
   "The IRI that `x` stands for, without angle brackets, or nil when there is
-  none. A keyword's prefix is looked up in `prefixes`, a map like
-  default-prefixes."
-  [x prefixes]
-  (as-iri x prefixes))
+  none. A keyword's prefix is looked up in `prefixes` (default-prefixes when
+  none are given)."
+  ([x]
+   (iri x default-prefixes))
+  ([x prefixes]
+   (as-iri x prefixes)))
 
 (def namespace-iris
   "A map of the name of each prefix in `prefixes` to its namespace IRI,

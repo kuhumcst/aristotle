@@ -1,16 +1,19 @@
 (ns dk.cst.theophrastus.rules
-  "Jena's rule reasoner: parse rules, make a reasoner of them, and make an
-  inference Model with it.
+  "Jena's rule reasoner: parse rules, make a reasoner of them, make an
+  inference Model with it, and read its schema or check its consistency.
 
   Pass the inference Model to theo/db, and an entity of the db has the
   properties that the rules infer as :inferred in its metadata.
 
   See https://jena.apache.org/documentation/inference/"
-  (:require [dk.cst.theophrastus :as theo])
+  (:require [clojure.string :as str]
+            [dk.cst.theophrastus :as theo]
+            [dk.cst.theophrastus.txn :as txn])
   (:import [java.util List]
            [org.apache.jena.graph Graph]
            [org.apache.jena.rdf.model InfModel Model ModelFactory]
-           [org.apache.jena.reasoner Reasoner ReasonerRegistry]
+           [org.apache.jena.reasoner BaseInfGraph InfGraph Reasoner
+            ReasonerRegistry ValidityReport ValidityReport$Report]
            [org.apache.jena.reasoner.rulesys GenericRuleReasoner Rule
             RuleReasoner]))
 
@@ -53,7 +56,8 @@
     (instance? Model x) x
     (instance? Graph x) (ModelFactory/createModelForGraph x)
     (map? x)            (theo/jena-model x)
-    :else (throw (ex-info (str "Not a db, Model or Graph: " x) {:x x}))))
+    :else (throw (ex-info (str "Not a db, Model or Graph: " (pr-str x))
+                          {:x x}))))
 
 (defn inf-model
   "An inference Model of the `reasoner` over the `data`, with the `schema`
@@ -66,6 +70,49 @@
    (ModelFactory/createInfModel reasoner (model data)))
   (^InfModel [^Reasoner reasoner schema data]
    (ModelFactory/createInfModel reasoner (model schema) (model data))))
+
+(defn schema
+  "A db of the schema of the inference Model of `db`, with the same prefixes,
+  e.g. for shacl/owl-shapes, or nil when there is none."
+  [{:keys [prefixes] :as db}]
+  (let [g (theo/jena-graph db)]
+    (when-let [schema-graph (when (instance? BaseInfGraph g)
+                              (.getSchemaGraph ^BaseInfGraph g))]
+      ;; not theo/db, which would write the prefixes to the schema
+      (theo/->Db (ModelFactory/createModelForGraph schema-graph)
+                 nil
+                 prefixes
+                 nil))))
+
+;; Jena prints the type and the text of a rule's report as literals, and
+;; the text is the first line of the description
+(defn- without-quotes
+  "The string `s` without the quotes around its first line, if it has them."
+  [s]
+  (str/replace-first s #"^\"(.*)\"(?=\n|$)" "$1"))
+
+(defn validate
+  "The consistency report of the reasoner of the inference db `db`, as a map
+  of :valid? (no errors), :clean? (no warnings either) and :reports. Each
+  report is a map of :error?, :type and :description. It's made in one read
+  transaction, and it throws when `db` isn't a db of an inference Model.
+
+  Only rules that check consistency report anything, e.g. owl-rules."
+  [db]
+  (let [g (theo/jena-graph db)]
+    (if (instance? InfGraph g)
+      (txn/calculate-read
+        db
+        #(let [^ValidityReport report (.validate ^InfGraph g)]
+           {:valid?  (.isValid report)
+            :clean?  (.isClean report)
+            :reports (mapv (fn [^ValidityReport$Report r]
+                             {:error?      (.isError r)
+                              :type        (without-quotes (.getType r))
+                              :description (without-quotes
+                                             (.getDescription r))})
+                           (iterator-seq (.getReports report)))}))
+      (throw (ex-info "Not a db of an inference Model" {:db db})))))
 
 (def owl-rules
   "The largest set of OWL rules that Jena supports, as a vector."

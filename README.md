@@ -145,7 +145,7 @@ Inference uses [Jena rules]. This one makes `ex:knows` symmetric:
 ```clojure
 (require '[dk.cst.theophrastus.shacl :as shacl])
 
-(shacl/validate db (shacl/parse "shapes.ttl"))
+(shacl/validate db "shapes.ttl")
 ;; => {:conforms? false
 ;;     :results   [{:focus-node :ex/alice :path :ex/age ...}]}
 ```

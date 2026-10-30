@@ -36,7 +36,8 @@
     (instance? Graph x)        nil
     ;; a db, whose namespace requires this one
     (map? x)                   (transactional (or (:dataset x) (:model x)))
-    :else (throw (ex-info (str "Not a db, Graph, Model or Dataset: " x)
+    :else (throw (ex-info (str "Not a db, Graph, Model or Dataset: "
+                               (pr-str x))
                           {:x x}))))
 
 ;; named after the methods of Jena's Txn that they call

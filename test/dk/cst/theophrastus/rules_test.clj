@@ -95,8 +95,37 @@
                            {:prefixes prefixes})]
     (is (= #{:ex/Dog :ex/Animal} (:rdf/type (theo/entity db :ex/rex)))
         "dbs as the schema and the data"))
-  (is (thrown-with-msg? ExceptionInfo #"Not a db, Model or Graph"
-                        (rules/inf-model (rules/reasoner []) "data"))))
+  (is (thrown-with-msg? ExceptionInfo #"Not a db, Model or Graph: \"data\""
+                        (rules/inf-model (rules/reasoner []) "data")))
+  (is (thrown-with-msg? ExceptionInfo #"Not a db, Model or Graph: nil"
+                        (rules/inf-model (rules/reasoner []) nil))))
+
+(deftest schema-of-inference
+  (let [reasoner (rules/reasoner (rules/parse rule-text))
+        db       (theo/db (rules/inf-model reasoner
+                                           (model-of schema)
+                                           (model-of data))
+                          {:prefixes prefixes})]
+    (is (= schema (theo/triples (rules/schema db))))
+    (is (= prefixes (:prefixes (rules/schema db))))
+    (is (nil? (rules/schema (theo/db {:prefixes prefixes})))
+        "not an inference db")))
+
+(deftest validate
+  (let [schema   (model-of [[:ex/A :owl/disjointWith :ex/B]])
+        reasoner (rules/reasoner rules/owl-mini-rules)
+        db-of    #(theo/db (rules/inf-model reasoner schema (model-of %))
+                           {:prefixes prefixes})
+        report   (rules/validate (db-of [[:ex/x :rdf/type :ex/A]
+                                         [:ex/x :rdf/type :ex/B]]))]
+    (is (false? (:valid? report)))
+    (is (= [true] (map :error? (:reports report))))
+    (is (= ["conflict"] (map :type (:reports report))) "without quotes")
+    (is (re-find #"^Individual a member of disjoint classes\n"
+                 (:description (first (:reports report)))))
+    (is (:valid? (rules/validate (db-of [[:ex/x :rdf/type :ex/A]])))))
+  (is (thrown-with-msg? ExceptionInfo #"Not a db of an inference Model"
+                        (rules/validate (theo/db)))))
 
 (deftest rule-sets
   (is (seq rules/owl-rules))

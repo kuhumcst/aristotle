@@ -128,9 +128,12 @@
     "The Jena node of `x`, as node returns it."))
 
 (defn node
-  "The Jena node of `x`, with `prefixes` for keywords."
-  ^Node [x prefixes]
-  (as-node x prefixes))
+  "The Jena node of `x`, with `prefixes` for keywords (term/default-prefixes
+  when none are given)."
+  (^Node [x]
+   (node x term/default-prefixes))
+  (^Node [x prefixes]
+   (as-node x prefixes)))
 
 (extend-protocol AsNode
   Node
@@ -270,9 +273,11 @@
 ;; one transient vector for all of them, since tx-data can have millions
 (defn triples
   "The Jena triples of `tx-data` (as theo/transact! takes it), with
-  `prefixes` for keywords."
-  [tx-data prefixes]
-  (persistent! (conj-triples! (transient []) tx-data prefixes)))
+  `prefixes` for keywords (term/default-prefixes when none are given)."
+  ([tx-data]
+   (triples tx-data term/default-prefixes))
+  ([tx-data prefixes]
+   (persistent! (conj-triples! (transient []) tx-data prefixes))))
 
 (defn pattern->nodes
   "The Jena nodes of the [s p o] `pattern` (as theo/retract! takes it), with

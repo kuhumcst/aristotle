@@ -116,7 +116,8 @@
          (->Db x nil prefixes nil))
 
      :else
-     (throw (ex-info (str "Not a Model, Dataset or Graph: " x) {:x x})))))
+     (throw (ex-info (str "Not a Model, Dataset or Graph: " (pr-str x))
+                     {:x x})))))
 
 (defn jena-model
   "The Jena Model of `db`: its Model, or the Model of its Dataset's default
@@ -228,15 +229,16 @@
   with these `opts`, and return `db`:
 
   - :syntax, a media type, e.g. \"text/turtle\", or a keyword of the name or
-    file extension of a syntax: :turtle or :ttl, :n-triples or :nt, :rdf-xml
-    or :rdf, :json-ld or :jsonld, and :n3. Without it, the name of a source
-    gives the syntax, e.g. Turtle for .ttl.
+    file extension of a syntax: :turtle or :ttl, :n-triples, :ntriples or
+    :nt, :rdf-xml, :rdfxml or :rdf, :json-ld or :jsonld, and :n3. Without
+    it, the name of a source gives the syntax, e.g. Turtle for .ttl, and a
+    stream is read as Turtle.
   - :base, the IRI that relative IRIs resolve against, by default the URL of
     the source.
 
-  A source is a File, URL, URI or file path, or an InputStream or Reader
-  with a :syntax. All the sources are parsed before anything is added, so a
-  syntax error leaves `db` as it was."
+  A source is a File, URL, URI or file path, or an InputStream or Reader.
+  All the sources are parsed before anything is added, so a syntax error
+  leaves `db` as it was."
   ([db source]
    (read! db source nil))
   ([db source opts]
@@ -247,9 +249,10 @@
   "Write `db` to the `target`, with the :syntax of the `opts` as read! takes
   it, and return `db`.
 
-  The target is a File or path, whose name gives the syntax when there is
-  no :syntax, e.g. Turtle for .ttl, or an OutputStream or Writer. The output
-  has the prefixes of `db`, and a db of a Dataset writes its default graph."
+  The target is a File or path, or an OutputStream or Writer. Without a
+  :syntax, the name of a file gives the syntax, e.g. Turtle for .ttl, and a
+  stream gets Turtle. The output has the prefixes of `db`, and a db of a
+  Dataset writes its default graph."
   ([db target]
    (write db target nil))
   ([db target {:keys [syntax]}]
@@ -460,18 +463,21 @@
 
 (defn triples
   "The triples of `db` that match the [s p o] `pattern`, where _ matches
-  anything, as [s p o] vectors of Clojure values. They are read in one read
-  transaction."
-  [{:keys [prefixes] :as db} pattern]
-  (txn/calculate-read
-    db
-    #(let [[^Node s ^Node p ^Node o] (convert/pattern->nodes pattern prefixes)]
-       (into []
-             (map (fn [^Triple t]
-                    [(convert/data (.getSubject t) prefixes)
-                     (convert/data (.getPredicate t) prefixes)
-                     (convert/data (.getObject t) prefixes)]))
-             (.toList (.find (query-graph db) s p o))))))
+  anything, as [s p o] vectors of Clojure values, or all of them when there
+  is no pattern. They are read in one read transaction."
+  ([db]
+   (triples db '[_ _ _]))
+  ([{:keys [prefixes] :as db} pattern]
+   (txn/calculate-read
+     db
+     #(let [[^Node s ^Node p ^Node o] (convert/pattern->nodes pattern
+                                                              prefixes)]
+        (into []
+              (map (fn [^Triple t]
+                     [(convert/data (.getSubject t) prefixes)
+                      (convert/data (.getPredicate t) prefixes)
+                      (convert/data (.getObject t) prefixes)]))
+              (.toList (.find (query-graph db) s p o)))))))
 
 (defn- property-pairs
   "The predicate and object of each of the Jena `triples` as Clojure

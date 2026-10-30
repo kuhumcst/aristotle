@@ -7,12 +7,14 @@
 
 (def aliases
   "The media type of each keyword for an RDF syntax of one graph: the name
-  of the syntax and its file extension."
+  of the syntax (with or without a hyphen) and its file extension."
   {:turtle    "text/turtle"
    :ttl       "text/turtle"
    :n-triples "application/n-triples"
+   :ntriples  "application/n-triples"
    :nt        "application/n-triples"
    :rdf-xml   "application/rdf+xml"
+   :rdfxml    "application/rdf+xml"
    :rdf       "application/rdf+xml"
    :json-ld   "application/ld+json"
    :jsonld    "application/ld+json"
@@ -20,23 +22,25 @@
 
 (defn lang
   "The Jena Lang of the :syntax option `x`, or of the name of the `file`
-  when there is no `x`, e.g. Turtle for .ttl. The option is a media type, a
-  key of aliases or a Lang. It throws when there is no syntax, or when it's
-  a syntax of several graphs."
+  when there is no `x`, e.g. Turtle for .ttl. Without either, as for a
+  stream, it's Turtle. The option is a media type, a key of aliases or a
+  Lang. It throws when there is no syntax, or when it's a syntax of several
+  graphs."
   ^Lang [x file]
   (let [media-type (if (keyword? x) (aliases x) x)
         l          (cond
                      (instance? Lang x)   x
                      (string? media-type) (RDFLanguages/contentTypeToLang
                                             ^String media-type)
-                     (and (nil? x) file)  (RDFLanguages/filenameToLang
-                                            (str file)))]
+                     (nil? x)             (if file
+                                            (RDFLanguages/filenameToLang
+                                              (str file))
+                                            Lang/TURTLE))]
     (cond
       (nil? l)
-      (throw (ex-info (cond
-                        (some? x)    (str "No RDF syntax for " (pr-str x))
-                        (some? file) (str "No RDF syntax for the name " file)
-                        :else        "A stream needs a :syntax")
+      (throw (ex-info (if (some? x)
+                        (str "No RDF syntax for " (pr-str x))
+                        (str "No RDF syntax for the name " file))
                       {:syntax x :file file}))
 
       (RDFLanguages/isQuads l)
@@ -49,8 +53,9 @@
 (defn parse
   "A new in-memory Graph of the triples in the RDF `sources`, with the
   :syntax and :base of the `opts`. A source is a File, URL, URI or file
-  path, whose name gives the syntax when there is no :syntax and whose URL
-  is the base when there is no :base, or an InputStream or Reader."
+  path, or an InputStream or Reader. Without a :syntax, the name of a
+  source gives the syntax and a stream is read as Turtle. Without a :base,
+  relative IRIs resolve against the URL of the source."
   ^Graph [sources {:keys [syntax base]}]
   (let [g (GraphMemFactory/createDefaultGraph)]
     (doseq [s sources]

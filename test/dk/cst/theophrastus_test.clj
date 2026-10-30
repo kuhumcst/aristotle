@@ -73,7 +73,7 @@
   (is (thrown-with-msg? ExceptionInfo #"Not a namespace IRI"
                         (theo/db (ModelFactory/createDefaultModel)
                                 {:prefixes {:ex "http://example.com/"}})))
-  (is (thrown-with-msg? ExceptionInfo #"Not a Model, Dataset or Graph"
+  (is (thrown-with-msg? ExceptionInfo #"Not a Model, Dataset or Graph: .*Db"
                         (theo/db (theo/db)))
       "a db is a map, but not one of options")
   (is (= "#object[dk.cst.theophrastus.Db \"a Model with 4 prefixes\"]"
@@ -452,6 +452,7 @@
         "_ matches anything")
     (is (= [['_building :ex/floor 3]] (theo/triples db ['_ :ex/floor '_]))
         "blank nodes and literals as Clojure values")
+    (is (= (count people) (count (theo/triples db))) "all of them")
     (is (= (set people) (set (theo/triples db '[_ _ _]))))
     (is (empty? (theo/triples db [:ex/nobody '_ '_])))
     (is (thrown-with-msg? ExceptionInfo #"Not a pattern"
@@ -692,6 +693,11 @@
                 {:syntax "application/n-triples"})
     (is (= 1 (graph-size db "http://example.com/g")) "an InputStream")
     (is (= nt (with-out-str (theo/write db *out* {:syntax :nt}))) "a Writer")
+    (is (= nt (with-out-str (theo/write db *out* {:syntax :ntriples})))
+        "Aristotle's keyword for N-Triples")
+    (is (str/includes? (with-out-str (theo/write db *out* {:syntax :rdfxml}))
+                       "rdf:RDF")
+        "Aristotle's keyword for RDF/XML")
     (let [out (ByteArrayOutputStream.)]
       (theo/write db out {:syntax "text/turtle"})
       (is (str/includes? (str out) "ex:s") "an OutputStream"))
@@ -700,8 +706,11 @@
       (theo/read! (theo/named-graph db :ex/txt) f {:syntax :turtle})
       (is (= 1 (graph-size db "http://example.com/txt"))
           "a :syntax wins over the name of a file"))
-    (is (thrown-with-msg? ExceptionInfo #"A stream needs a :syntax"
-                          (theo/read! db (StringReader. ttl))))
+    (theo/read! (theo/named-graph db :ex/plain) (StringReader. ttl))
+    (is (= 1 (graph-size db "http://example.com/plain"))
+        "a stream is Turtle when there is no :syntax")
+    (is (str/includes? (with-out-str (theo/write db *out*)) "ex:s")
+        "Turtle for a Writer too")
     (is (thrown-with-msg? ExceptionInfo #"No RDF syntax for :nope"
                           (theo/read! db (StringReader. ttl) {:syntax :nope})))
     (is (thrown-with-msg? ExceptionInfo #"Not a syntax for one graph"

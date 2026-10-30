@@ -58,7 +58,13 @@
   (is (thrown-with-msg? ExceptionInfo #"No namespace"
                         (convert/node :nowhere/x prefixes)))
   (is (thrown-with-msg? ExceptionInfo #"Not an absolute IRI"
-                        (convert/node (URI. "x") prefixes))))
+                        (convert/node (URI. "x") prefixes)))
+  (is (= "http://www.w3.org/2000/01/rdf-schema#label"
+         (.getURI (convert/node :rdfs/label))
+         (.getURI (.getPredicate ^org.apache.jena.graph.Triple
+                                 (first (convert/triples
+                                          [["<urn:s>" :rdfs/label "x"]])))))
+      "the default prefixes when none are given"))
 
 (deftest clojure->literal
   (is (= ["hund" (str xsd "string") ""] (literal (convert/node "hund" prefixes))))

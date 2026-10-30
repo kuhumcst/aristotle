@@ -52,7 +52,8 @@
   (is (some? (txn/transactional (DatasetFactory/createTxnMem))))
   (is (nil? (txn/transactional (ModelFactory/createDefaultModel))))
   (is (nil? (txn/transactional (inference (ModelFactory/createDefaultModel)))))
-  (is (thrown? ExceptionInfo (txn/transactional {}))))
+  (is (thrown-with-msg? ExceptionInfo #"or Dataset: nil$"
+                        (txn/transactional {}))))
 
 (deftest transaction-types
   (doseq [[label setup] tdb2-cases

@@ -45,6 +45,8 @@
     (is (= "https://example.org/data/item-1"
            (term/iri :data/item-1 prefixes)))
     (is (= (str xsd "string") (term/iri :xsd/string term/default-prefixes)))
+    (is (= (str xsd "string") (term/iri :xsd/string))
+        "the default prefixes when none are given")
     (is (nil? (term/iri :data/item-1 term/default-prefixes))
         "a keyword whose prefix isn't known")
     (is (nil? (term/iri :label prefixes)))
